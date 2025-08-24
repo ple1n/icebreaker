@@ -2,3 +2,4 @@
 /models
 *.gguf
 llama.log
+*.env

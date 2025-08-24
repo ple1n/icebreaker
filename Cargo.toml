@@ -23,6 +23,7 @@ iced.features = ["tokio", "sipper", "svg", "markdown", "highlighter", "system", 
 
 iced_palace.workspace = true
 iced_palace.features = ["rand"]
+langchain-rust = { version = "4.6.0", path = "../langchain-rust" }
 
 [build-dependencies]
 iced_fontello = "0.13"

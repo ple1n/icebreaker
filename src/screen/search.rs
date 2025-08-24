@@ -1,6 +1,7 @@
 use crate::core::model;
-use crate::core::{Error, Model};
+use crate::core::{Error, HFModel};
 use crate::icon;
+use crate::model::Model;
 use crate::widget::sidebar;
 
 use iced::border;
@@ -21,6 +22,9 @@ pub struct Search {
     search_temperature: usize,
     is_searching: bool,
     mode: Mode,
+    show_filters: bool,
+    show_local_models: bool,  // Add filter state
+    show_online_models: bool, // Add filter state
 }
 
 #[derive(Debug, Clone)]
@@ -33,6 +37,9 @@ pub enum Message {
     FilesListed(model::Id, Result<model::Files, Error>),
     Boot(model::File),
     Back,
+    ToggleFilters,            // Add new message
+    ToggleLocalModels(bool),  // Add filter message
+    ToggleOnlineModels(bool), // Add filter message
 }
 
 pub enum Mode {
@@ -54,11 +61,14 @@ impl Search {
     pub fn new() -> (Self, Task<Message>) {
         (
             Self {
-                models: Vec::new(),
+                models: vec![],
                 search: String::new(),
                 search_temperature: 0,
                 is_searching: true,
                 mode: Mode::Search,
+                show_filters: false,      // Initialize new state
+                show_local_models: true,  // Default to showing local models
+                show_online_models: true, // Default to showing online models
             },
             Task::batch([
                 Task::perform(Model::list(), Message::ModelsListed),
@@ -159,6 +169,18 @@ impl Search {
 
                 Action::None
             }
+            Message::ToggleFilters => {
+                self.show_filters = !self.show_filters;
+                Action::None
+            }
+            Message::ToggleLocalModels(t) => {
+                self.show_local_models = t;
+                Action::None
+            }
+            Message::ToggleOnlineModels(t) => {
+                self.show_online_models = t;
+                Action::None
+            }
         }
     }
 
@@ -174,18 +196,66 @@ impl Search {
     }
 
     pub fn search(&self) -> Element<'_, Message> {
-        let search = text_input("Search language models...", &self.search)
-            .size(20)
-            .padding(10)
-            .on_input(Message::SearchChanged)
+        let search_row = row![
+            text_input("Search language models...", &self.search)
+                .size(20)
+                .padding(10)
+                .on_input(Message::SearchChanged)
+                .style(|theme, status| {
+                    let style = text_input::default(theme, status);
+                    text_input::Style {
+                        border: style.border.rounded(5),
+                        ..style
+                    }
+                })
+                .width(Fill),
+            button(
+                container(center(icon::filter().size(16))) // Adjusted icon size
+                    .padding(5) // Reduced padding
+                    .width(42)
+                    .height(42)
+            )
+            .padding(0)
             .style(|theme, status| {
-                let style = text_input::default(theme, status);
+                let palette = theme.extended_palette();
 
-                text_input::Style {
-                    border: style.border.rounded(5),
-                    ..style
+                button::Style {
+                    background: Some(
+                        match status {
+                            button::Status::Hovered => palette.background.weak.color,
+                            button::Status::Pressed => palette.background.strong.color,
+                            _ => palette.background.weakest.color,
+                        }
+                        .into(),
+                    ),
+                    border: border::rounded(5).width(1).color(match status {
+                        button::Status::Hovered => palette.background.strong.color,
+                        button::Status::Pressed => palette.background.strongest.color,
+                        _ => palette.background.weak.color,
+                    }),
+                    text_color: palette.background.weak.text,
+                    ..button::secondary(theme, status)
                 }
-            });
+            })
+            .on_press(Message::ToggleFilters)
+        ]
+        .spacing(5) // Reduced spacing
+        .height(42)
+        .align_y(iced::Alignment::Center);
+
+        let filter_panel = self.show_filters.then(|| {
+            let local_toggle = widget::toggler(self.show_local_models)
+                .label("Local Models".to_string())
+                .on_toggle(Message::ToggleLocalModels);
+
+            let online_toggle = widget::toggler(self.show_online_models)
+                .label("Online Models".to_string())
+                .on_toggle(Message::ToggleOnlineModels);
+
+            container(column![local_toggle, online_toggle].spacing(10))
+                .padding(10)
+                .style(container::bordered_box)
+        });
 
         let models: Element<'_, _> = {
             let search_terms: Vec<_> = self
@@ -201,8 +271,8 @@ impl Search {
                 .filter(|model| {
                     self.search.is_empty()
                         || search_terms.iter().all(|term| {
-                            model.id.name().to_lowercase().contains(term)
-                                || model.id.author().to_lowercase().contains(term)
+                            model.slash_id().name().to_lowercase().contains(term)
+                                || model.slash_id().author().to_lowercase().contains(term)
                         })
                 })
                 .peekable();
@@ -224,7 +294,7 @@ impl Search {
             }
         };
 
-        column![search, models].spacing(10).into()
+        column![search_row, filter_panel, models].spacing(10).into()
     }
 
     pub fn details<'a>(
@@ -383,53 +453,61 @@ fn model_card(model: &Model) -> Element<'_, Message> {
         .into()
     }
 
-    let title = ellipsized_text(model.id.name())
-        .font(Font::MONOSPACE)
-        .wrapping(text::Wrapping::None);
+    match model {
+        Model::HF(model) => {
+            let title = ellipsized_text(model.id.name())
+                .font(Font::MONOSPACE)
+                .wrapping(text::Wrapping::None);
 
-    let metadata = row![
-        stat(icon::user(), text(model.id.author()), text::secondary),
-        stat(
-            icon::clock(),
-            value(model.last_modified.format("%-e %B, %y")),
-            text::secondary,
-        ),
-        stat(icon::download(), value(model.downloads), text::primary),
-        stat(icon::star(), value(model.likes), text::warning),
-    ]
-    .spacing(20);
+            let metadata = row![
+                stat(icon::user(), text(model.id.author()), text::secondary),
+                // Hide when None: format inside the map to avoid calling on Option
+                stat(
+                    icon::clock(),
+                    value(model.last_modified.format("%-e %B, %y")),
+                    text::secondary,
+                ),
+                stat(icon::download(), value(model.downloads), text::primary),
+                stat(icon::star(), value(model.likes), text::warning),
+            ]
+            .spacing(20);
 
-    button(column![title, metadata].spacing(10))
-        .width(Fill)
-        .padding(10)
-        .style(|theme, status| {
-            let palette = theme.extended_palette();
+            button(column![title, metadata].spacing(10))
+                .width(Fill)
+                .padding(10)
+                .style(|theme, status| {
+                    let palette = theme.extended_palette();
 
-            let base = button::Style {
-                background: Some(palette.background.weakest.color.into()),
-                text_color: palette.background.weakest.text,
-                border: border::rounded(5)
-                    .color(palette.background.weak.color)
-                    .width(1),
-                ..button::Style::default()
-            };
+                    let base = button::Style {
+                        background: Some(palette.background.weakest.color.into()),
+                        text_color: palette.background.weakest.text,
+                        border: border::rounded(5)
+                            .color(palette.background.weak.color)
+                            .width(1),
+                        ..button::Style::default()
+                    };
 
-            match status {
-                button::Status::Active | button::Status::Disabled => base,
-                button::Status::Hovered => button::Style {
-                    background: Some(palette.background.weak.color.into()),
-                    text_color: palette.background.weak.text,
-                    border: base.border.color(palette.background.strong.color),
-                    ..base
-                },
-                button::Status::Pressed => button::Style {
-                    border: base.border.color(palette.background.strongest.color),
-                    ..base
-                },
-            }
-        })
-        .on_press_with(|| Message::Select(model.id.clone()))
-        .into()
+                    match status {
+                        button::Status::Active | button::Status::Disabled => base,
+                        button::Status::Hovered => button::Style {
+                            background: Some(palette.background.weak.color.into()),
+                            text_color: palette.background.weak.text,
+                            border: base.border.color(palette.background.strong.color),
+                            ..base
+                        },
+                        button::Status::Pressed => button::Style {
+                            border: base.border.color(palette.background.strongest.color),
+                            ..base
+                        },
+                    }
+                })
+                .on_press_with(|| Message::Select(model.id.clone()))
+                .into()
+        }
+        Model::API(model) => {
+            todo!()
+        }
+    }
 }
 
 pub fn view_files<'a>(

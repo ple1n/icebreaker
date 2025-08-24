@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use icebreaker_core as core;
+use langchain_rust::document_loaders::dotenvy;
+use log::warn;
 
 mod browser;
 mod icon;
@@ -24,6 +26,8 @@ use std::mem;
 
 pub fn main() -> iced::Result {
     tracing_subscriber::fmt::init();
+    let path = dotenvy::dotenv().unwrap();
+    warn!("using {:?}", path);
 
     iced::application(Icebreaker::new, Icebreaker::update, Icebreaker::view)
         .title(Icebreaker::title)

@@ -15,14 +15,79 @@ const HF_URL: &str = "https://huggingface.co";
 const API_URL: &str = "https://huggingface.co/api";
 
 #[derive(Debug, Clone)]
-pub struct Model {
+pub struct HFModel {
     pub id: Id,
     pub last_modified: chrono::DateTime<chrono::Local>,
     pub downloads: Downloads,
     pub likes: Likes,
 }
 
+#[derive(Debug, Clone)]
+pub struct ModelOnline {
+    pub base_url: String,
+    pub api_type: APIType,
+    pub cost: Cost,
+    pub id: Id,
+}
+
+#[derive(Debug, Clone)]
+pub enum Model {
+    HF(HFModel),
+    API(ModelOnline),
+}
+
+#[derive(Debug, Clone)]
+pub enum APIType {
+    /// Dispatches to nanogpt impl in async_openai
+    NanoGPT,
+    OpenAI,
+}
+
+#[derive(Debug, Clone)]
+pub struct Cost {
+    pub prompt: Quantity,
+    pub completion: Quantity,
+}
+#[derive(Debug, Clone)]
+pub struct Quantity {
+    pub num: u32,
+    pub unit: Currency,
+    pub denom: f32,
+}
+
+#[derive(Debug, Clone)]
+pub enum Currency {
+    USD,
+}
+
+impl Quantity {
+    pub fn usd_per_1m(n: u32) -> Self {
+        Self {
+            num: n,
+            unit: Currency::USD,
+            denom: 1e6,
+        }
+    }
+}
+
 impl Model {
+    pub async fn list() -> Result<Vec<Self>, Error> {
+        Ok(vec![])
+    }
+    /// Return ID of the form repo/name
+    pub fn slash_id(&self) -> &Id {
+        match &self {
+            Self::API(m) => &m.id,
+            Self::HF(m) => &m.id,
+        }
+    }
+    pub async fn search(query: String) -> Result<Vec<Self>, Error> {
+
+        Ok(vec![])
+    }
+}
+
+impl HFModel {
     pub async fn list() -> Result<Vec<Self>, Error> {
         Self::search(String::new()).await
     }
@@ -72,7 +137,7 @@ impl Model {
     }
 }
 
-impl fmt::Display for Model {
+impl fmt::Display for HFModel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.id.0)
     }

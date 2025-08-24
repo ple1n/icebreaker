@@ -7,7 +7,7 @@ pub mod web;
 
 pub use assistant::Assistant;
 pub use chat::Chat;
-pub use model::Model;
+pub use model::HFModel;
 pub use plan::Plan;
 pub use settings::Settings;
 pub use url::Url;
