@@ -38,3 +38,4 @@ serde_json.workspace = true
 sipper.workspace = true
 thiserror.workspace = true
 toml.workspace = true
+langchain-rust = { workspace = true }

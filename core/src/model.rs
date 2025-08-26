@@ -3,6 +3,8 @@ use crate::request;
 use crate::Error;
 
 use decoder::{decode, encode, Value};
+use langchain_rust::llm::nanogpt::NanoGPT;
+use langchain_rust::llm::OpenAIConfig;
 use serde::{Deserialize, Serialize};
 use sipper::{sipper, Sipper, Straw};
 use tokio::fs;
@@ -10,9 +12,14 @@ use tokio::fs;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 const HF_URL: &str = "https://huggingface.co";
 const API_URL: &str = "https://huggingface.co/api";
+
+pub struct APIs {
+    pub nano: Option<OpenAIConfig>,
+}
 
 #[derive(Debug, Clone)]
 pub struct HFModel {
@@ -24,7 +31,6 @@ pub struct HFModel {
 
 #[derive(Debug, Clone)]
 pub struct ModelOnline {
-    pub base_url: String,
     pub api_type: APIType,
     pub cost: Cost,
     pub id: Id,
@@ -71,7 +77,12 @@ impl Quantity {
 }
 
 impl Model {
-    pub async fn list() -> Result<Vec<Self>, Error> {
+    pub async fn list(api: Arc<APIs>) -> Result<Vec<Self>, Error> {
+        if let Some(nano) = api.nano.clone() {
+            let nanogpt = NanoGPT::new(nano);
+            // let models = nanogpt.get_models(false)?;
+
+        }
         Ok(vec![])
     }
     /// Return ID of the form repo/name
@@ -82,7 +93,6 @@ impl Model {
         }
     }
     pub async fn search(query: String) -> Result<Vec<Self>, Error> {
-
         Ok(vec![])
     }
 }

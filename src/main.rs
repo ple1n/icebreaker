@@ -1,6 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+use icebreaker_core::model::APIs;
 use icebreaker_core as core;
 use langchain_rust::document_loaders::dotenvy;
+use langchain_rust::llm::nanogpt::NanoGPT;
+use langchain_rust::llm::OpenAIConfig;
 use log::warn;
 
 mod browser;
@@ -23,6 +26,7 @@ use iced::widget::{button, column, container, row, rule, vertical_rule, vertical
 use iced::{Element, Fill, Subscription, Task, Theme};
 
 use std::mem;
+use std::sync::Arc;
 
 pub fn main() -> iced::Result {
     tracing_subscriber::fmt::init();
@@ -43,6 +47,7 @@ struct Icebreaker {
     system: Option<system::Information>,
     library: model::Library,
     theme: Theme,
+    api: Arc<APIs>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +72,13 @@ impl Icebreaker {
         let settings = Settings::fetch().unwrap_or_default();
         let scan = model::Library::scan(settings.library);
 
+        let nano_config = OpenAIConfig::new()
+            .with_api_base("https://nano-gpt.com/api/v1")
+            .with_api_key(dotenvy::var("NANOGPT_KEY").expect("provide key"));
+        let api = APIs {
+            nano: Some(nano_config),
+        };
+
         (
             Self {
                 screen: Screen::Loading,
@@ -74,6 +86,7 @@ impl Icebreaker {
                 last_conversation: None,
                 system: None,
                 theme: theme::from_data(&settings.theme),
+                api: api.into()
             },
             Task::batch([
                 Task::future(Chat::fetch_last_opened()).then(|last_chat| {
@@ -345,7 +358,7 @@ impl Icebreaker {
     }
 
     fn open_search(&mut self) -> Task<Message> {
-        let (search, task) = screen::Search::new();
+        let (search, task) = screen::Search::new(self.api.clone());
 
         self.screen = Screen::Search(search);
 

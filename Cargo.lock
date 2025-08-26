@@ -2399,6 +2399,7 @@ dependencies = [
  "directories",
  "function",
  "futures",
+ "langchain-rust",
  "log",
  "reqwest 0.12.22",
  "scraper 0.22.0",

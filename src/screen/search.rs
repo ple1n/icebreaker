@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use crate::core::model;
 use crate::core::{Error, HFModel};
-use crate::icon;
 use crate::model::Model;
 use crate::widget::sidebar;
+use crate::{icon, APIs};
 
 use iced::border;
 use iced::font;
@@ -23,8 +25,9 @@ pub struct Search {
     is_searching: bool,
     mode: Mode,
     show_filters: bool,
-    show_local_models: bool,  // Add filter state
-    show_online_models: bool, // Add filter state
+    show_local_models: bool,
+    show_online_models: bool,
+    api: Arc<APIs>,
 }
 
 #[derive(Debug, Clone)]
@@ -58,20 +61,22 @@ pub enum Action {
 }
 
 impl Search {
-    pub fn new() -> (Self, Task<Message>) {
+    pub fn new(api: Arc<APIs>) -> (Self, Task<Message>) {
+        let k = Self {
+            models: vec![],
+            search: String::new(),
+            search_temperature: 0,
+            is_searching: true,
+            mode: Mode::Search,
+            show_filters: false,
+            show_local_models: false,
+            show_online_models: true,
+            api: api.clone(),
+        };
         (
-            Self {
-                models: vec![],
-                search: String::new(),
-                search_temperature: 0,
-                is_searching: true,
-                mode: Mode::Search,
-                show_filters: false,      // Initialize new state
-                show_local_models: true,  // Default to showing local models
-                show_online_models: true, // Default to showing online models
-            },
+            k,
             Task::batch([
-                Task::perform(Model::list(), Message::ModelsListed),
+                Task::perform(Model::list(api), Message::ModelsListed),
                 widget::focus_next(),
             ]),
         )
