@@ -1,3 +1,5 @@
+#![feature(error_generic_member_access)]
+
 pub mod assistant;
 pub mod chat;
 pub mod model;
@@ -10,6 +12,9 @@ pub use chat::Chat;
 pub use model::HFModel;
 pub use plan::Plan;
 pub use settings::Settings;
+use thiserror::{capture, thiserror, Error};
+use thiserror::backtrace::Backtrace;
+
 pub use url::Url;
 
 mod directory;
@@ -19,7 +24,8 @@ use std::io;
 use std::sync::Arc;
 use tokio::task;
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[thiserror]
+#[derive(Clone, Error, Debug)]
 pub enum Error {
     #[error("request failed: {0}")]
     RequestFailed(Arc<reqwest::Error>),
@@ -45,42 +51,42 @@ pub enum Error {
 
 impl From<reqwest::Error> for Error {
     fn from(error: reqwest::Error) -> Self {
-        Self::RequestFailed(Arc::new(error))
+        Self::RequestFailed(Arc::new(error), capture!())
     }
 }
 
 impl From<io::Error> for Error {
     fn from(error: io::Error) -> Self {
-        Self::IOFailed(Arc::new(error))
+        Self::IOFailed(Arc::new(error), capture!())
     }
 }
 
 impl From<serde_json::Error> for Error {
     fn from(error: serde_json::Error) -> Self {
-        Self::InvalidJson(Arc::new(error))
+        Self::InvalidJson(Arc::new(error), capture!())
     }
 }
 
 impl From<toml::ser::Error> for Error {
     fn from(error: toml::ser::Error) -> Self {
-        Self::ImpossibleToml(Arc::new(error))
+        Self::ImpossibleToml(Arc::new(error), capture!())
     }
 }
 
 impl From<toml::de::Error> for Error {
     fn from(error: toml::de::Error) -> Self {
-        Self::InvalidToml(Arc::new(error))
+        Self::InvalidToml(Arc::new(error), capture!())
     }
 }
 
 impl From<decoder::Error> for Error {
     fn from(error: decoder::Error) -> Self {
-        Self::DecoderFailed(Arc::new(error))
+        Self::DecoderFailed(Arc::new(error), capture!())
     }
 }
 
 impl From<task::JoinError> for Error {
     fn from(error: task::JoinError) -> Self {
-        Self::JoinFailed(Arc::new(error))
+        Self::JoinFailed(Arc::new(error), capture!())
     }
 }

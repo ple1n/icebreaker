@@ -19,7 +19,17 @@ tokio.workspace = true
 tracing-subscriber.workspace = true
 langchain-rust.workspace = true
 iced.workspace = true
-iced.features = ["tokio", "sipper", "svg", "markdown", "highlighter", "system", "crisp", "debug"]
+iced.features = [
+    "tokio",
+    "sipper",
+    "svg",
+    "markdown",
+    "highlighter",
+    "system",
+    "crisp",
+    "debug",
+]
+thiserror.workspace = true
 
 iced_palace.workspace = true
 iced_palace.features = ["rand"]
@@ -54,7 +64,7 @@ scraper = "0.22"
 serde = "1.0"
 serde_json = "1.0"
 sipper = "0.1"
-thiserror = "1.0"
+thiserror = { version = "2.*", path = "../thiserror/thiserror/" }
 tokio = "1.38"
 tokio-stream = "0.1"
 toml = "0.9"
@@ -79,3 +89,5 @@ iced_core.rev = "9d56b488cc08b7365fb1839ed47ef92f3ff0fa36"
 
 iced_palace.git = "https://github.com/hecrj/iced_palace"
 iced_palace.rev = "cb8f841b638c3886c6582e3d7f2e1de8c67e2e2b"
+
+thiserror = { path = "../thiserror/thiserror/" }

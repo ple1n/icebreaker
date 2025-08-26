@@ -4,6 +4,7 @@ use crate::Error;
 use serde::Deserialize;
 use serde_json::json;
 use sipper::{sipper, FutureExt, Sipper, Straw, StreamExt};
+use thiserror::capture;
 use tokio::process;
 
 use std::env;
@@ -192,11 +193,11 @@ impl Assistant {
                     lines
                         .next_line()
                         .await?
-                        .ok_or_else(|| Error::DockerFailed("no container id returned by docker"))?
+                        .ok_or_else(|| Error::DockerFailed("no container id returned by docker", capture!()))?
                 };
 
                 if !docker.wait().await?.success() {
-                    return Err(Error::DockerFailed("failed to create container"));
+                    return Err(Error::DockerFailed("failed to create container", capture!()));
                 }
 
                 sender.progress("Launching assistant...", 99).await;
@@ -216,7 +217,7 @@ impl Assistant {
 
                 (server, logs.stdout.take(), logs.stderr.take())
             } else {
-                return Err(Error::NoExecutorAvailable);
+                return Err(Error::NoExecutorAvailable(capture!()));
             };
 
             let log_output = {
@@ -280,7 +281,7 @@ impl Assistant {
                 });
             }
 
-            Err(Error::ExecutorFailed("llama-server exited unexpectedly"))
+            Err(Error::ExecutorFailed("llama-server exited unexpectedly", capture!()))
         })
     }
 
