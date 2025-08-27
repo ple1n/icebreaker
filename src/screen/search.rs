@@ -7,7 +7,7 @@ use crate::model::Model;
 use crate::widget::sidebar;
 use crate::{icon, APIs};
 
-use icebreaker_core::model::ModelOnline;
+use icebreaker_core::model::{EndpointId, ModelOnline};
 use iced::border;
 use iced::font;
 use iced::time::Duration;
@@ -510,7 +510,7 @@ impl Search {
     pub fn sidebar<'a>(&'a self, library: &'a model::Library) -> Element<'a, Message> {
         let header = sidebar::header("Models", Some((icon::search(), Message::Back)));
 
-        if library.files().is_empty() {
+        if library.files.is_empty() {
             return column![
                 header,
                 center(
@@ -524,7 +524,7 @@ impl Search {
             .into();
         }
 
-        let library = column(library.files().iter().map(|file: &model::FileOrAPI| {
+        let library = column(library.files.iter().map(|(fid, file)| {
             use model::*;
 
             let title: Element<'_, _> = match file {
@@ -741,9 +741,7 @@ pub fn view_files<'a>(
         library: &'a model::Library,
     ) -> Option<Element<'a, Message>> {
         let variant = file.variant()?;
-
-        
-        let is_ready = library.files().contains(file);
+        let is_ready = library.files.contains_key(&EndpointId::from_file(file));
 
         Some(
             button(

@@ -42,7 +42,7 @@ pub enum Model {
     API(ModelOnline),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum APIType {
     /// Dispatches to nanogpt impl in async_openai
     NanoGPT,
@@ -278,6 +278,12 @@ pub struct File {
     pub size: Option<Size>,
 }
 
+impl EndpointId {
+    pub fn from_file(f: &File) -> Self {
+        Self::Local(f.model.clone())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FileOrAPI {
     File(File),
@@ -480,19 +486,22 @@ impl Readme {
     }
 }
 
+use std::collections::HashMap;
 #[derive(Debug, Clone, Default)]
 pub struct Library {
     directory: Directory,
-    files: Vec<FileOrAPI>,
+    pub files: HashMap<EndpointId, FileOrAPI>
 }
 
-pub struct EndpointId {
-    
+#[derive(Hash, PartialEq, Eq, Debug, Clone)]
+pub enum EndpointId {
+    Local(Id),
+    Remote { api_type: APIType, id: Id },
 }
 
 impl Library {
     pub async fn scan(directory: impl AsRef<Path>) -> Result<Self, Error> {
-        let mut files = Vec::new();
+        let mut files = HashMap::new();
         let directory = directory.as_ref();
         let mut list = fs::read_dir(directory).await?;
 
@@ -516,16 +525,19 @@ impl Library {
                     {
                         continue;
                     }
-
-                    files.push(FileOrAPI::File(File {
-                        model: Id(format!(
-                            "{}/{}",
-                            author.file_name().display(),
-                            model.file_name().display(),
-                        )),
+                    let id = Id(format!(
+                        "{}/{}",
+                        author.file_name().display(),
+                        model.file_name().display(),
+                    ));
+                    let f_id = EndpointId::Local(id.clone());
+                    let file = FileOrAPI::File(File {
+                        model: id,
                         name: file.file_name().display().to_string(),
                         size: Some(Size(file.metadata().await?.len())),
-                    }));
+                    });
+
+                    let _ = files.insert(f_id, file);
                 }
             }
         }
@@ -538,10 +550,6 @@ impl Library {
 
     pub fn directory(&self) -> &Directory {
         &self.directory
-    }
-
-    pub fn files(&self) -> &[FileOrAPI] {
-        &self.files
     }
 }
 

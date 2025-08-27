@@ -2491,6 +2491,7 @@ dependencies = [
  "itertools",
  "langchain-rust",
  "log",
+ "nanodb",
  "open",
  "rand 0.9.2",
  "rfd",
@@ -3462,6 +3463,19 @@ dependencies = [
  "spirv",
  "thiserror 2.0.16",
  "unicode-ident",
+]
+
+[[package]]
+name = "nanodb"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d01529f007f57affea74efcd9ed62aef7adf35e7c5d4de4967eb88fdff18a40"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]
