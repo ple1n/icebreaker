@@ -13,7 +13,6 @@ pub use model::HFModel;
 pub use plan::Plan;
 pub use settings::Settings;
 use thiserror::{capture, thiserror, Error};
-use thiserror::backtrace::Backtrace;
 
 pub use url::Url;
 

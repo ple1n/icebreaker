@@ -510,7 +510,58 @@ fn model_card(model: &Model) -> Element<'_, Message> {
                 .into()
         }
         Model::API(model) => {
-            todo!()
+            let title = ellipsized_text(model.id.name())
+                .font(Font::MONOSPACE)
+                .wrapping(text::Wrapping::None);
+
+            let metadata = row![
+                stat(icon::user(), text(model.id.author()), text::secondary),
+                stat(
+                    icon::cloud(),
+                    text(format!("{:?}", model.api_type)),
+                    text::secondary,
+                ),
+                model.cost.as_ref().map(|cost| {
+                    row![
+                        stat(icon::dollar(), value(cost.prompt.clone()), text::secondary),
+                        stat(icon::dollar(), value(cost.completion.clone()), text::secondary),
+                    ]
+                    .spacing(10)
+                }),
+            ]
+            .spacing(20);
+
+            button(column![title, metadata].spacing(10))
+                .width(Fill)
+                .padding(10)
+                .style(|theme, status| {
+                    let palette = theme.extended_palette();
+
+                    let base = button::Style {
+                        background: Some(palette.background.weakest.color.into()),
+                        text_color: palette.background.weakest.text,
+                        border: border::rounded(5)
+                            .color(palette.background.weak.color)
+                            .width(1),
+                        ..button::Style::default()
+                    };
+
+                    match status {
+                        button::Status::Active | button::Status::Disabled => base,
+                        button::Status::Hovered => button::Style {
+                            background: Some(palette.background.weak.color.into()),
+                            text_color: palette.background.weak.text,
+                            border: base.border.color(palette.background.strong.color),
+                            ..base
+                        },
+                        button::Status::Pressed => button::Style {
+                            border: base.border.color(palette.background.strongest.color),
+                            ..base
+                        },
+                    }
+                })
+                .on_press_with(|| Message::Select(model.id.clone()))
+                .into()
         }
     }
 }

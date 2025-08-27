@@ -32,7 +32,7 @@ pub struct HFModel {
 #[derive(Debug, Clone)]
 pub struct ModelOnline {
     pub api_type: APIType,
-    pub cost: Cost,
+    pub cost: Option<Cost>,
     pub id: Id,
 }
 
@@ -56,9 +56,9 @@ pub struct Cost {
 }
 #[derive(Debug, Clone)]
 pub struct Quantity {
-    pub num: u32,
+    pub num: f64,
     pub unit: Currency,
-    pub denom: f32,
+    pub denom: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -67,7 +67,7 @@ pub enum Currency {
 }
 
 impl Quantity {
-    pub fn usd_per_1m(n: u32) -> Self {
+    pub fn usd_per_1m(n: f64) -> Self {
         Self {
             num: n,
             unit: Currency::USD,
@@ -80,8 +80,21 @@ impl Model {
     pub async fn list(api: Arc<APIs>) -> Result<Vec<Self>, Error> {
         if let Some(nano) = api.nano.clone() {
             let nanogpt = NanoGPT::new(nano);
-            // let models = nanogpt.get_models(false)?;
-
+            let models = nanogpt.get_models(true).await?;
+            return Ok(models
+                .data
+                .into_iter()
+                .map(
+                    |m| Model::API(ModelOnline {
+                        api_type: APIType::NanoGPT,
+                        cost: m.pricing.as_ref().map(|p| Cost {
+                            prompt: Quantity::usd_per_1m(p.prompt),
+                            completion: Quantity::usd_per_1m(p.completion),
+                        }),
+                        id: Id(m.id),
+                    }),
+                )
+                .collect());
         }
         Ok(vec![])
     }
@@ -537,3 +550,11 @@ impl AsRef<Path> for Directory {
         &self.0
     }
 }
+
+
+impl fmt::Display for Quantity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:.2}", self.num)
+    }
+}
+

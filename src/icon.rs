@@ -1,6 +1,6 @@
 // Generated automatically by iced_fontello at build time.
 // Do not edit manually. Source: ../fonts/icebreaker-icons.toml
-// f0f8a2d628bb0b422989fb60970838cd499b2607be67e70eaa9f54c0b74b32b1
+// 0d66c91584919ee988f86cc5e7d99c19ba025ffae4654ee8fa92a9f30ad8252f
 use iced::widget::{text, Text};
 use iced::Font;
 
@@ -34,12 +34,20 @@ pub fn clock<'a>() -> Text<'a> {
     icon("\u{1F554}")
 }
 
+pub fn cloud<'a>() -> Text<'a> {
+    icon("\u{F0ED}")
+}
+
 pub fn cog<'a>() -> Text<'a> {
     icon("\u{2699}")
 }
 
 pub fn cubes<'a>() -> Text<'a> {
     icon("\u{F1B3}")
+}
+
+pub fn dollar<'a>() -> Text<'a> {
+    icon("\u{F155}")
 }
 
 pub fn download<'a>() -> Text<'a> {
