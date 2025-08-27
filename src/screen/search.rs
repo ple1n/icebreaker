@@ -36,7 +36,7 @@ pub enum Message {
     SearchChanged(String),
     SearchCooled,
     Select(model::Id),
-    DetailsFetched(model::Id, Result<model::Details, Error>),
+    HFDetailsFetched(model::Id, Result<model::Details, Error>),
     FilesListed(model::Id, Result<model::Files, Error>),
     Boot(model::File),
     Back,
@@ -125,25 +125,30 @@ impl Search {
                     Action::None
                 }
             }
-            Message::Select(model) => {
+            Message::Select(id) => {
+                let model = todo();
                 self.mode = Mode::Details {
-                    model: model.clone(),
+                    model: id.clone(),
                     details: None,
                     files: None,
                 };
-
-                Action::Run(Task::batch([
-                    Task::perform(
-                        model::Details::fetch(model.clone()),
-                        Message::DetailsFetched.with(model.clone()),
-                    ),
-                    Task::perform(
-                        model::File::list(model.clone()),
-                        Message::FilesListed.with(model),
-                    ),
-                ]))
+                match model {
+                    Model::HF(_) => Action::Run(Task::batch([
+                        Task::perform(
+                            model::Details::fetch(id.clone()),
+                            Message::HFDetailsFetched.with(id.clone()),
+                        ),
+                        Task::perform(model::File::list(id.clone()), Message::FilesListed.with(id.clone())),
+                    ])),
+                    Model::API(_) => {
+                        Action::Run(Task::perform(
+                            model::Details::fetch(id.clone()),
+                            Message::HFDetailsFetched.with(id.clone()),
+                        ))
+                    }
+                } 
             }
-            Message::DetailsFetched(new_model, Ok(new_details)) => {
+            Message::HFDetailsFetched(new_model, Ok(new_details)) => {
                 match &mut self.mode {
                     Mode::Details { model, details, .. } if model == &new_model => {
                         *details = Some(new_details);
@@ -169,7 +174,7 @@ impl Search {
                 Action::Run(widget::focus_next())
             }
             Message::Boot(file) => Action::Boot(file),
-            Message::DetailsFetched(_, Err(error)) | Message::FilesListed(_, Err(error)) => {
+            Message::HFDetailsFetched(_, Err(error)) | Message::FilesListed(_, Err(error)) => {
                 log::error!("{error}");
 
                 Action::None
@@ -457,7 +462,6 @@ fn model_card(model: &Model) -> Element<'_, Message> {
         .spacing(5)
         .into()
     }
-
     match model {
         Model::HF(model) => {
             let title = ellipsized_text(model.id.name())
@@ -524,7 +528,11 @@ fn model_card(model: &Model) -> Element<'_, Message> {
                 model.cost.as_ref().map(|cost| {
                     row![
                         stat(icon::dollar(), value(cost.prompt.clone()), text::secondary),
-                        stat(icon::dollar(), value(cost.completion.clone()), text::secondary),
+                        stat(
+                            icon::dollar(),
+                            value(cost.completion.clone()),
+                            text::secondary
+                        ),
                     ]
                     .spacing(10)
                 }),
