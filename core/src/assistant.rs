@@ -2,6 +2,7 @@ use crate::model;
 use crate::Error;
 
 use serde::Deserialize;
+use serde::Serialize;
 use serde_json::json;
 use sipper::{sipper, FutureExt, Sipper, Straw, StreamExt};
 use thiserror::capture;
@@ -14,7 +15,7 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
 pub struct Assistant {
-    file: model::File,
+    pub file: model::FileOrAPI,
     _server: Arc<Server>,
 }
 
@@ -27,7 +28,7 @@ impl Assistant {
 
     pub fn boot(
         directory: model::Directory,
-        file: model::File,
+        file: model::FileOrAPI,
         backend: Backend,
     ) -> impl Straw<Self, BootEvent, Error> {
         use tokio::io::{self, AsyncBufReadExt};
@@ -49,9 +50,22 @@ impl Assistant {
         }
 
         sipper(move |sender| async move {
+            let file = match file {
+                model::FileOrAPI::File(f) => f,
+                model::FileOrAPI::API(ap) => {
+                    return Ok(Self {
+                        file: model::FileOrAPI::API(ap),
+                        _server: Server::API.into(),
+                    });
+                }
+            };
+
             let mut sender = Sender(sender);
 
-            let mut download = file.download(&directory).pin();
+            let file2 = file.clone();
+
+            let mut download =
+                sipper(|sender| async { file2.download(&directory, sender).await }).pin();
             let mut last_percent = None;
 
             while let Some(progress) = download.sip().await {
@@ -190,14 +204,16 @@ impl Assistant {
 
                     let mut lines = output.lines();
 
-                    lines
-                        .next_line()
-                        .await?
-                        .ok_or_else(|| Error::DockerFailed("no container id returned by docker", capture!()))?
+                    lines.next_line().await?.ok_or_else(|| {
+                        Error::DockerFailed("no container id returned by docker", capture!())
+                    })?
                 };
 
                 if !docker.wait().await?.success() {
-                    return Err(Error::DockerFailed("failed to create container", capture!()));
+                    return Err(Error::DockerFailed(
+                        "failed to create container",
+                        capture!(),
+                    ));
                 }
 
                 sender.progress("Launching assistant...", 99).await;
@@ -276,12 +292,15 @@ impl Assistant {
                 log_handle.abort();
 
                 return Ok(Self {
-                    file,
+                    file: model::FileOrAPI::File(file),
                     _server: Arc::new(server),
                 });
             }
 
-            Err(Error::ExecutorFailed("llama-server exited unexpectedly", capture!()))
+            Err(Error::ExecutorFailed(
+                "llama-server exited unexpectedly",
+                capture!(),
+            ))
         })
     }
 
@@ -458,12 +477,8 @@ impl Assistant {
         })
     }
 
-    pub fn file(&self) -> &model::File {
-        &self.file
-    }
-
     pub fn name(&self) -> &str {
-        self.file.model.name()
+        self.file.slash_id().name()
     }
 }
 
@@ -510,14 +525,14 @@ impl Message {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Reply {
     pub reasoning: Option<Reasoning>,
     pub content: String,
     pub last_token: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Reasoning {
     pub content: String,
     pub duration: Duration,
@@ -533,6 +548,7 @@ pub enum Token {
 enum Server {
     Container(String),
     Process(process::Child),
+    API,
 }
 
 impl Server {
@@ -583,6 +599,7 @@ impl Drop for Server {
                     .spawn();
             }
             Self::Process(_process) => {}
+            _ => {}
         }
     }
 }

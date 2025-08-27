@@ -2,20 +2,21 @@ use crate::assistant::{Assistant, Message, Reasoning, Reply};
 use crate::web;
 use crate::Error;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sipper::{sipper, Sender, Sipper, Straw};
 use url::Url;
 
 use std::collections::{BTreeMap, HashMap};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Plan {
     pub reasoning: Option<Reasoning>,
     pub steps: Vec<Step>,
     pub outcomes: Vec<Outcome>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step {
     pub evidence: String,
     pub description: String,
@@ -23,14 +24,16 @@ pub struct Step {
     pub inputs: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Outcome {
     Search(Status<Vec<Url>>),
     ScrapeText(Status<Vec<web::Summary>>),
     Answer(Status<Reply>),
 }
 
-#[derive(Debug, Clone)]
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Status<T> {
     Active(T),
     Done(T),
@@ -62,7 +65,8 @@ impl<T> Status<T> {
     }
 }
 
-#[derive(Debug, Clone)]
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
     Designing(Reasoning),
     Designed(Plan),

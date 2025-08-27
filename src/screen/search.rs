@@ -40,7 +40,7 @@ pub enum Message {
     Select(model::Id),
     HFDetailsFetched(model::Id, Result<model::Details, Error>),
     FilesListed(model::Id, Result<model::Files, Error>),
-    Boot(model::File),
+    Boot(model::FileOrAPI),
     Back,
     ToggleFilters,
     ToggleLocalModels(bool),
@@ -63,7 +63,7 @@ pub enum Mode {
 
 pub enum Action {
     None,
-    Boot(model::File),
+    Boot(model::FileOrAPI),
     Run(Task<Message>),
 }
 
@@ -763,7 +763,7 @@ pub fn view_files<'a>(
                 .align_y(Center)
                 .spacing(5),
             )
-            .on_press_with(|| Message::Boot(file.clone()))
+            .on_press_with(|| Message::Boot(model::FileOrAPI::File(file.clone())))
             .style(move |theme, status| {
                 let base = button::background(theme, status);
 

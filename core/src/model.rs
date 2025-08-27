@@ -307,6 +307,44 @@ impl PartialEq for ModelOnline {
 
 impl Eq for ModelOnline {}
 
+impl FileOrAPI {
+    pub async fn list(directory: &Directory) -> Result<Vec<Self>, Error> {
+        let mut models = Vec::new();
+        let dir = directory.as_ref();
+        let mut entries = fs::read_dir(dir).await?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+                let content = fs::read_to_string(&path).await?;
+                let model_online: ModelOnline = serde_json::from_str(&content)?;
+                models.push(FileOrAPI::API(model_online));
+            }
+        }
+
+        Ok(models)
+    }
+
+    pub fn download<'a>(
+        &'a self,
+        directory: &'a Directory,
+    ) -> impl Straw<PathBuf, request::Progress, Error> + 'a {
+        sipper(async move |sender| match self {
+            FileOrAPI::API(ap) => {
+                let json_path = directory
+                    .0
+                    .join(format!("{}.json", ap.id.0.replace('/', "_")));
+                if !json_path.exists() {
+                    let json_content = serde_json::to_string_pretty(ap)?;
+                    fs::write(&json_path, json_content).await?;
+                }
+                Ok(json_path)
+            }
+            FileOrAPI::File(file) => file.download(directory, sender).await,
+        })
+    }
+}
+
 impl File {
     pub async fn list(id: Id) -> Result<Files, Error> {
         let client = reqwest::Client::new();
@@ -356,46 +394,45 @@ impl File {
         Ok(files)
     }
 
-    pub fn download<'a>(
+    pub async fn download<'a>(
         &'a self,
         directory: &'a Directory,
-    ) -> impl Straw<PathBuf, request::Progress, Error> + 'a {
-        sipper(async move |sender| {
-            let old_path = Directory::old().0.join(&self.name);
-            let directory = directory.0.join(&self.model.0);
-            let model_path = directory.join(&self.name);
+        sender: sipper::Sender<request::Progress>,
+    ) -> Result<PathBuf, Error> {
+        let old_path = Directory::old().0.join(&self.name);
+        let directory = directory.0.join(&self.model.0);
+        let model_path = directory.join(&self.name);
 
-            fs::create_dir_all(&directory).await?;
+        fs::create_dir_all(&directory).await?;
 
-            if fs::try_exists(&model_path).await? {
-                let file_metadata = fs::metadata(&model_path).await?;
+        if fs::try_exists(&model_path).await? {
+            let file_metadata = fs::metadata(&model_path).await?;
 
-                if self.size.is_none_or(|size| size == file_metadata.len()) {
-                    return Ok(model_path);
-                }
-
-                fs::remove_file(&model_path).await?;
-            }
-
-            if fs::copy(&old_path, &model_path).await.is_ok() {
-                let _ = fs::remove_file(old_path).await;
+            if self.size.is_none_or(|size| size == file_metadata.len()) {
                 return Ok(model_path);
             }
 
-            let url = format!(
-                "{}/{id}/resolve/main/{filename}?download=true",
-                HF_URL,
-                id = self.model.0,
-                filename = self.name
-            );
+            fs::remove_file(&model_path).await?;
+        }
 
-            let temp_path = model_path.with_extension("tmp");
+        if fs::copy(&old_path, &model_path).await.is_ok() {
+            let _ = fs::remove_file(old_path).await;
+            return Ok(model_path);
+        }
 
-            request::download_file(url, &temp_path).run(sender).await?;
-            fs::rename(temp_path, &model_path).await?;
+        let url = format!(
+            "{}/{id}/resolve/main/{filename}?download=true",
+            HF_URL,
+            id = self.model.0,
+            filename = self.name
+        );
 
-            Ok(model_path)
-        })
+        let temp_path = model_path.with_extension("tmp");
+
+        request::download_file(url, &temp_path).run(sender).await?;
+        fs::rename(temp_path, &model_path).await?;
+
+        Ok(model_path)
     }
 
     pub fn decode(value: decoder::Value) -> decoder::Result<Self> {
@@ -490,7 +527,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Default)]
 pub struct Library {
     directory: Directory,
-    pub files: HashMap<EndpointId, FileOrAPI>
+    pub files: HashMap<EndpointId, FileOrAPI>,
 }
 
 #[derive(Hash, PartialEq, Eq, Debug, Clone)]

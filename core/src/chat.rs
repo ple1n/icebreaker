@@ -16,15 +16,16 @@ use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Chat {
     pub id: Id,
-    pub file: model::File,
+    pub file: model::FileOrAPI,
     pub title: Option<String>,
     pub history: Vec<Item>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+
 pub enum Item {
     User(String),
     Reply(Reply),
@@ -57,7 +58,7 @@ impl Chat {
     }
 
     pub async fn create(
-        file: model::File,
+        file: model::FileOrAPI,
         title: Option<String>,
         history: Vec<Item>,
     ) -> Result<Self, Error> {
@@ -256,7 +257,7 @@ impl Id {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entry {
     pub id: Id,
-    pub file: model::File,
+    pub file: model::FileOrAPI,
     pub title: Option<String>,
 }
 

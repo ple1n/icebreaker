@@ -8,6 +8,7 @@ use crate::ui::plan;
 use crate::ui::{Markdown, Plan, Reply};
 use crate::widget::{copy, regenerate, sidebar, tip, toggle};
 
+use icebreaker_core::model::FileOrAPI;
 use iced::clipboard;
 use iced::gradient;
 use iced::padding;
@@ -40,7 +41,7 @@ pub struct Conversation {
 
 enum State {
     Booting {
-        file: File,
+        file: FileOrAPI,
         logs: Vec<String>,
         stage: String,
         progress: u32,
@@ -91,7 +92,7 @@ pub enum Action {
 }
 
 impl Conversation {
-    pub fn new(library: &Library, file: File, backend: Backend) -> (Self, Task<Message>) {
+    pub fn new(library: &Library, file: FileOrAPI, backend: Backend) -> (Self, Task<Message>) {
         let (boot, handle) = Task::sip(
             Assistant::boot(library.directory().clone(), file.clone(), backend),
             Message::Booting,
@@ -369,7 +370,7 @@ impl Conversation {
 
                         Action::None
                     }
-                    State::Running { assistant, sending } if assistant.file() == &chat.file => {
+                    State::Running { assistant, sending } if &assistant.file == &chat.file => {
                         self.id = Some(chat.id);
                         self.title = chat.title;
                         self.history = History::restore(chat.history);
@@ -450,7 +451,7 @@ impl Conversation {
             Action::Run(Task::perform(
                 Chat {
                     id: *id,
-                    file: assistant.file().clone(),
+                    file: assistant.file.clone(),
                     title: self.title.clone(),
                     history: items,
                 }
@@ -459,7 +460,7 @@ impl Conversation {
             ))
         } else {
             Action::Run(Task::perform(
-                Chat::create(assistant.file().clone(), self.title.clone(), items),
+                Chat::create(assistant.file.clone(), self.title.clone(), items),
                 Message::Created,
             ))
         }
@@ -718,7 +719,7 @@ impl Conversation {
         let chats = column(self.chats.iter().map(|chat| {
             let card = match &chat.title {
                 Some(title) => ellipsized_text(title),
-                None => ellipsized_text(chat.file.model.name()).font(Font::MONOSPACE),
+                None => ellipsized_text(chat.file.slash_id().name()).font(Font::MONOSPACE),
             }
             .wrapping(text::Wrapping::None);
 
@@ -742,7 +743,7 @@ impl Conversation {
 
     pub fn model_name(&self) -> &str {
         match &self.state {
-            State::Booting { file, .. } => file.model.name(),
+            State::Booting { file, .. } => file.slash_id().name(),
             State::Running { assistant, .. } => assistant.name(),
         }
     }

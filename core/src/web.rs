@@ -1,6 +1,6 @@
 use crate::assistant::Message;
 use crate::{Assistant, Error, Url};
-
+use serde::{Deserialize, Serialize};
 use sipper::{sipper, Sipper, Straw};
 use std::sync::LazyLock;
 
@@ -8,7 +8,7 @@ pub struct Search {
     pub results: Vec<Url>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Summary {
     pub url: Url,
     pub content: String,
