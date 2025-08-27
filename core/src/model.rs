@@ -29,7 +29,7 @@ pub struct HFModel {
     pub likes: Likes,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelOnline {
     pub api_type: APIType,
     pub cost: Option<Cost>,
@@ -42,26 +42,26 @@ pub enum Model {
     API(ModelOnline),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum APIType {
     /// Dispatches to nanogpt impl in async_openai
     NanoGPT,
     OpenAI,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cost {
     pub prompt: Quantity,
     pub completion: Quantity,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Quantity {
     pub num: f64,
     pub unit: Currency,
     pub denom: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Currency {
     USD,
 }
@@ -84,16 +84,16 @@ impl Model {
             return Ok(models
                 .data
                 .into_iter()
-                .map(
-                    |m| Model::API(ModelOnline {
+                .map(|m| {
+                    Model::API(ModelOnline {
                         api_type: APIType::NanoGPT,
                         cost: m.pricing.as_ref().map(|p| Cost {
                             prompt: Quantity::usd_per_1m(p.prompt),
                             completion: Quantity::usd_per_1m(p.completion),
                         }),
                         id: Id(m.id),
-                    }),
-                )
+                    })
+                })
                 .collect());
         }
         Ok(vec![])
@@ -166,7 +166,7 @@ impl fmt::Display for HFModel {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct Id(pub(crate) String);
 
 impl Id {
@@ -277,6 +277,29 @@ pub struct File {
     #[serde(default)]
     pub size: Option<Size>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FileOrAPI {
+    File(File),
+    API(ModelOnline),
+}
+
+impl FileOrAPI {
+    pub fn slash_id(&self) -> &Id {
+        match &self {
+            Self::File(f) => &f.model,
+            Self::API(a) => &a.id,
+        }
+    }
+}
+
+impl PartialEq for ModelOnline {
+    fn eq(&self, other: &Self) -> bool {
+        self.api_type == other.api_type && self.id == other.id
+    }
+}
+
+impl Eq for ModelOnline {}
 
 impl File {
     pub async fn list(id: Id) -> Result<Files, Error> {
@@ -457,10 +480,14 @@ impl Readme {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Library {
     directory: Directory,
-    files: Vec<File>,
+    files: Vec<FileOrAPI>,
+}
+
+pub struct EndpointId {
+    
 }
 
 impl Library {
@@ -490,7 +517,7 @@ impl Library {
                         continue;
                     }
 
-                    files.push(File {
+                    files.push(FileOrAPI::File(File {
                         model: Id(format!(
                             "{}/{}",
                             author.file_name().display(),
@@ -498,7 +525,7 @@ impl Library {
                         )),
                         name: file.file_name().display().to_string(),
                         size: Some(Size(file.metadata().await?.len())),
-                    });
+                    }));
                 }
             }
         }
@@ -513,7 +540,7 @@ impl Library {
         &self.directory
     }
 
-    pub fn files(&self) -> &[File] {
+    pub fn files(&self) -> &[FileOrAPI] {
         &self.files
     }
 }
@@ -551,10 +578,8 @@ impl AsRef<Path> for Directory {
     }
 }
 
-
 impl fmt::Display for Quantity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:.2}", self.num)
     }
 }
-

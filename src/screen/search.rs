@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::core::model;
@@ -6,6 +7,7 @@ use crate::model::Model;
 use crate::widget::sidebar;
 use crate::{icon, APIs};
 
+use icebreaker_core::model::ModelOnline;
 use iced::border;
 use iced::font;
 use iced::time::Duration;
@@ -19,7 +21,7 @@ use iced_palace::widget::ellipsized_text;
 use function::Binary;
 
 pub struct Search {
-    models: Vec<Model>,
+    models: HashMap<model::Id, Model>,
     search: String,
     search_temperature: usize,
     is_searching: bool,
@@ -40,17 +42,22 @@ pub enum Message {
     FilesListed(model::Id, Result<model::Files, Error>),
     Boot(model::File),
     Back,
-    ToggleFilters,            // Add new message
-    ToggleLocalModels(bool),  // Add filter message
-    ToggleOnlineModels(bool), // Add filter message
+    ToggleFilters,
+    ToggleLocalModels(bool),
+    ToggleOnlineModels(bool),
+    InstallAPI(model::Id), // Add new message for installing API models
 }
 
 pub enum Mode {
     Search,
-    Details {
+    HFDetails {
         model: model::Id,
         details: Option<model::Details>,
         files: Option<model::Files>,
+    },
+    APIDetails {
+        model: model::Id,
+        model_online: ModelOnline,
     },
 }
 
@@ -63,7 +70,7 @@ pub enum Action {
 impl Search {
     pub fn new(api: Arc<APIs>) -> (Self, Task<Message>) {
         let k = Self {
-            models: vec![],
+            models: HashMap::new(),
             search: String::new(),
             search_temperature: 0,
             is_searching: true,
@@ -85,14 +92,21 @@ impl Search {
     pub fn title(&self) -> &str {
         match &self.mode {
             Mode::Search => "Models",
-            Mode::Details { model, .. } => model.name(),
+            Mode::HFDetails { model, .. } => model.name(),
+            Mode::APIDetails {
+                model,
+                model_online,
+            } => model.name(),
         }
     }
 
     pub fn update(&mut self, message: Message) -> Action {
         match message {
             Message::ModelsListed(Ok(models)) => {
-                self.models = models;
+                self.models = models
+                    .into_iter()
+                    .map(|model| (model.slash_id().clone(), model))
+                    .collect();
                 self.is_searching = false;
 
                 Action::None
@@ -126,31 +140,42 @@ impl Search {
                 }
             }
             Message::Select(id) => {
-                let model = todo();
-                self.mode = Mode::Details {
-                    model: id.clone(),
-                    details: None,
-                    files: None,
-                };
-                match model {
-                    Model::HF(_) => Action::Run(Task::batch([
-                        Task::perform(
-                            model::Details::fetch(id.clone()),
-                            Message::HFDetailsFetched.with(id.clone()),
-                        ),
-                        Task::perform(model::File::list(id.clone()), Message::FilesListed.with(id.clone())),
-                    ])),
-                    Model::API(_) => {
-                        Action::Run(Task::perform(
-                            model::Details::fetch(id.clone()),
-                            Message::HFDetailsFetched.with(id.clone()),
-                        ))
+                let model = self.models.get(&id);
+                if let Some(model) = model {
+                    match model {
+                        Model::HF(_) => {
+                            self.mode = Mode::HFDetails {
+                                model: id.clone(),
+                                details: None,
+                                files: None,
+                            };
+                            Action::Run(Task::batch([
+                                Task::perform(
+                                    model::Details::fetch(id.clone()),
+                                    Message::HFDetailsFetched.with(id.clone()),
+                                ),
+                                Task::perform(
+                                    model::File::list(id.clone()),
+                                    Message::FilesListed.with(id.clone()),
+                                ),
+                            ]))
+                        }
+                        Model::API(model_online) => {
+                            self.mode = Mode::APIDetails {
+                                model: id.clone(),
+                                model_online: model_online.clone(),
+                            };
+                            Action::None
+                        }
                     }
-                } 
+                } else {
+                    log::warn!("select {:?}", &id);
+                    Action::None
+                }
             }
             Message::HFDetailsFetched(new_model, Ok(new_details)) => {
                 match &mut self.mode {
-                    Mode::Details { model, details, .. } if model == &new_model => {
+                    Mode::HFDetails { model, details, .. } if model == &new_model => {
                         *details = Some(new_details);
                     }
                     _ => {}
@@ -160,7 +185,7 @@ impl Search {
             }
             Message::FilesListed(new_model, Ok(new_files)) => {
                 match &mut self.mode {
-                    Mode::Details { model, files, .. } if model == &new_model => {
+                    Mode::HFDetails { model, files, .. } if model == &new_model => {
                         *files = Some(new_files);
                     }
                     _ => {}
@@ -191,17 +216,26 @@ impl Search {
                 self.show_online_models = t;
                 Action::None
             }
+            Message::InstallAPI(id) => {
+                // Add model to local registry of favorited models
+                log::info!("Installing API model: {:?}", id);
+                Action::None
+            }
         }
     }
 
     pub fn view<'a>(&'a self, library: &'a model::Library) -> Element<'a, Message> {
         match &self.mode {
             Mode::Search => self.search(),
-            Mode::Details {
+            Mode::HFDetails {
                 model,
                 details,
                 files,
             } => self.details(model, details.as_ref(), files.as_ref(), library),
+            Mode::APIDetails {
+                model,
+                model_online,
+            } => self.details_api(model, model_online),
         }
     }
 
@@ -277,7 +311,7 @@ impl Search {
 
             let mut filtered_models = self
                 .models
-                .iter()
+                .values()
                 .filter(|model| {
                     self.search.is_empty()
                         || search_terms.iter().all(|term| {
@@ -385,6 +419,94 @@ impl Search {
         .into()
     }
 
+    pub fn details_api<'a>(
+        &self,
+        model: &'a model::Id,
+        model_online: &'a ModelOnline,
+    ) -> Element<'a, Message> {
+        use iced::widget::Text;
+
+        let back = button(row![icon::left(), "All models"].align_y(Center).spacing(10))
+            .padding([10, 0])
+            .on_press(Message::Back)
+            .style(button::text);
+
+        fn badge<'a>(icon: Text<'a>, value: Text<'a>) -> Element<'a, Message> {
+            container(
+                row![
+                    icon.size(10).style(text::secondary).line_height(1.0),
+                    value.size(12).font(Font::MONOSPACE)
+                ]
+                .align_y(Center)
+                .spacing(5),
+            )
+            .padding([4, 7])
+            .style(container::bordered_box)
+            .into()
+        }
+
+        let header = {
+            let title = center_x(
+                row![
+                    text(model.author()).size(18),
+                    text("/").size(18),
+                    ellipsized_text(model.name())
+                        .size(20)
+                        .font(Font {
+                            weight: font::Weight::Semibold,
+                            ..Font::MONOSPACE
+                        })
+                        .wrapping(text::Wrapping::None)
+                ]
+                .align_y(Center)
+                .spacing(5),
+            );
+
+            let badges = row![
+                badge(icon::cloud(), text(format!("{:?}", model_online.api_type))),
+                model_online.cost.as_ref().map(|cost| {
+                    row![
+                        badge(icon::dollar(), value(cost.prompt.clone())),
+                        badge(icon::dollar(), value(cost.completion.clone())),
+                    ]
+                    .spacing(10)
+                }),
+            ]
+            .align_y(Center)
+            .spacing(10);
+
+            column![title, badges].spacing(10).align_x(Center)
+        };
+
+        let install_button = button("Install")
+            .padding([10, 20])
+            .on_press(Message::InstallAPI(model.clone()))
+            .style(|theme: &Theme, status| {
+                let palette = theme.extended_palette();
+                let base = button::primary(theme, status);
+                button::Style {
+                    background: base.background.map(|bg| {
+                        match status {
+                            button::Status::Hovered => palette.primary.weak.color,
+                            button::Status::Pressed => palette.primary.strong.color,
+                            _ => palette.primary.base.color,
+                        }
+                        .into()
+                    }),
+                    ..base
+                }
+            });
+
+        scrollable(center_x(
+            column![back, header, install_button]
+                .spacing(20)
+                .max_width(600)
+                .clip(true),
+        ))
+        .spacing(10)
+        .into()
+    }
+
     pub fn sidebar<'a>(&'a self, library: &'a model::Library) -> Element<'a, Message> {
         let header = sidebar::header("Models", Some((icon::search(), Message::Back)));
 
@@ -402,27 +524,49 @@ impl Search {
             .into();
         }
 
-        let library = column(library.files().iter().map(|file| {
-            let title = ellipsized_text(file.model.name())
-                .font(Font::MONOSPACE)
-                .wrapping(text::Wrapping::None);
+        let library = column(library.files().iter().map(|file: &model::FileOrAPI| {
+            use model::*;
 
-            let author = row![
-                icon::user()
-                    .size(10)
-                    .line_height(1.0)
-                    .style(text::secondary),
-                text(file.model.author()).size(12).style(text::secondary),
-            ]
-            .spacing(5)
-            .align_y(Center);
-
-            let variant = file.variant().map(|variant| {
-                text(variant)
+            let title: Element<'_, _> = match file {
+                FileOrAPI::API(a) => widget::text!("{:?}", &a.id).into(),
+                FileOrAPI::File(f) => ellipsized_text(f.model.name())
                     .font(Font::MONOSPACE)
-                    .size(12)
-                    .style(text::secondary)
-            });
+                    .wrapping(text::Wrapping::None)
+                    .into(),
+            };
+
+            let author = match file {
+                FileOrAPI::API(a) => row![
+                    icon::cloud()
+                        .size(10)
+                        .line_height(1.0)
+                        .style(text::secondary),
+                    text(format!("{:?}", &a.api_type))
+                        .size(12)
+                        .style(text::secondary),
+                ]
+                .spacing(5)
+                .align_y(Center),
+                FileOrAPI::File(f) => row![
+                    icon::user()
+                        .size(10)
+                        .line_height(1.0)
+                        .style(text::secondary),
+                    text(f.model.author()).size(12).style(text::secondary),
+                ]
+                .spacing(5)
+                .align_y(Center),
+            };
+
+            let variant = match file {
+                FileOrAPI::API(a) => None,
+                FileOrAPI::File(file) => Some(file.variant().map(|variant| {
+                    text(variant)
+                        .font(Font::MONOSPACE)
+                        .size(12)
+                        .style(text::secondary)
+                })),
+            };
 
             let entry = column![
                 title,
@@ -433,11 +577,23 @@ impl Search {
             .spacing(2);
 
             let is_active = match &self.mode {
-                Mode::Details { model, .. } => model == &file.model,
+                Mode::HFDetails { model, .. } => match file {
+                    FileOrAPI::File(f) => model == &f.model,
+                    _ => false,
+                },
+                Mode::APIDetails {
+                    model,
+                    model_online,
+                } => match file {
+                    FileOrAPI::API(a) => a == model_online,
+                    _ => false,
+                },
                 _ => false,
             };
 
-            sidebar::item(entry, is_active, || Message::Select(file.model.clone()))
+            sidebar::item(entry, is_active, || {
+                Message::Select(file.slash_id().clone())
+            })
         }));
 
         column![header, scrollable(library).spacing(10).height(Fill)]
@@ -585,6 +741,8 @@ pub fn view_files<'a>(
         library: &'a model::Library,
     ) -> Option<Element<'a, Message>> {
         let variant = file.variant()?;
+
+        
         let is_ready = library.files().contains(file);
 
         Some(
