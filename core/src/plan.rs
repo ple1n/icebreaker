@@ -1,7 +1,8 @@
-use crate::assistant::{Assistant, Message, Reasoning, Reply};
+use crate::assistant::{Assistant, Reasoning, Reply, SimpleMessage};
 use crate::web;
 use crate::Error;
 
+use langchain_rust::schemas::{Message, MessageType};
 use serde::{Deserialize, Serialize};
 use sipper::{sipper, Sender, Sipper, Straw};
 use url::Url;
@@ -15,7 +16,6 @@ pub struct Plan {
     pub outcomes: Vec<Outcome>,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step {
     pub evidence: String,
@@ -24,14 +24,12 @@ pub struct Step {
     pub inputs: Vec<String>,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Outcome {
     Search(Status<Vec<Url>>),
     ScrapeText(Status<Vec<web::Summary>>),
     Answer(Status<Reply>),
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Status<T> {
@@ -65,7 +63,6 @@ impl<T> Status<T> {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
     Designing(Reasoning),
@@ -81,8 +78,8 @@ impl Plan {
     ) -> impl Straw<(), Event, Error> + 'a {
         sipper(move |mut progress| async move {
             let Some(query) = history.iter().rev().find_map(|item| {
-                if let Message::User(query) = item {
-                    Some(query)
+                if item.message_type == MessageType::HumanMessage {
+                    Some(item.content.clone())
                 } else {
                     None
                 }
@@ -109,7 +106,7 @@ impl Plan {
 
             progress.send(Event::Designed(plan.clone())).await;
 
-            let _ = execute(assistant, history, query, &plan)
+            let _ = execute(assistant, history, &query, &plan)
                 .run(progress)
                 .await?;
 
@@ -134,7 +131,7 @@ fn design<'a>(
             .reply(
                 "You are a helpful assistant.",
                 history,
-                &[Message::System(BROWSE_PROMPT.to_owned())],
+                &[Message::new_system_message(BROWSE_PROMPT.to_owned())],
             )
             .filter_with(|(reply, _token)| reply.reasoning.map(Event::Designing))
             .run(progress)
@@ -377,7 +374,7 @@ fn execute<'a>(
                     let outputs = process.text(&step.inputs).join("\n\n");
 
                     let query = [
-                        Message::System(format!(
+                        Message::new_system_message(format!(
                             "In order to figure out the user's request, you have already \
                         performed certain actions to gather information. Here is a \
                         summary of the steps executed so far:\n\
@@ -388,7 +385,7 @@ fn execute<'a>(
                         {outputs}\n\
                         Analyze the outputs carefully before replying to the user."
                         )),
-                        Message::User(query.to_owned()),
+                        Message::new_human_message(query.to_owned()),
                     ];
 
                     let mut reply = assistant

@@ -1,5 +1,7 @@
-use crate::assistant::Message;
+use crate::assistant::SimpleMessage;
 use crate::{Assistant, Error, Url};
+use langchain_rust::schemas::Message as LMessage;
+
 use serde::{Deserialize, Serialize};
 use sipper::{sipper, Sipper, Straw};
 use std::sync::LazyLock;
@@ -65,7 +67,7 @@ pub fn summarize<'a>(
         let reply = assistant
             .reply(
                 "You are a helpful assistant.",
-                &[Message::User(format!(
+                &[LMessage::new_human_message(format!(
                     "```\n\
                     {text}\n\
                     ```\n\n\

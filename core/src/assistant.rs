@@ -4,9 +4,13 @@ use crate::model::APIType;
 use crate::model::EndpointId;
 use crate::Error;
 
+use langchain_rust::chain::LLMChainBuilder;
 use langchain_rust::language_models::llm::LLM;
 use langchain_rust::llm::nanogpt::NanoGPT;
 use langchain_rust::llm::OpenAIConfig;
+use langchain_rust::prompt::MessageFormatterStruct;
+use langchain_rust::schemas::messages;
+use log::warn;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
@@ -14,6 +18,7 @@ use sipper::{sipper, FutureExt, Sipper, Straw, StreamExt};
 use thiserror::capture;
 use tokio::process;
 
+use langchain_rust::schemas::Message as LMessage;
 use std::env;
 use std::path::Path;
 use std::sync::Arc;
@@ -325,8 +330,8 @@ impl Assistant {
     pub fn reply<'a>(
         &'a self,
         prompt: &'a str,
-        messages: &'a [Message],
-        append: &'a [Message],
+        messages: &'a [LMessage],
+        append: &'a [LMessage],
     ) -> impl Straw<Reply, (Reply, Token), Error> + 'a {
         sipper(move |mut progress| async move {
             let mut reasoning = None;
@@ -389,8 +394,8 @@ impl Assistant {
     pub fn complete<'a>(
         &'a self,
         system_prompt: &'a str,
-        messages: &'a [Message],
-        append: &'a [Message],
+        messages: &'a [LMessage],
+        append: &'a [LMessage],
     ) -> impl Straw<(), Token, Error> + 'a {
         sipper(move |mut sender| async move {
             match self._server.as_ref() {
@@ -398,10 +403,44 @@ impl Assistant {
                     let model = self.file.api.as_ref().unwrap();
                     match model.config.kind {
                         APIType::NanoGPT => {
+                            use futures::StreamExt;
+                            use langchain_rust::{
+                                chain::{Chain, LLMChainBuilder},
+                                fmt_message, fmt_template, message_formatter,
+                                prompt::HumanMessagePromptTemplate,
+                                prompt_args,
+                                schemas::messages::Message,
+                                template_fstring,
+                            };
+
+                            use langchain_rust::llm::nanogpt::*;
+
                             let nano: NanoGPT<OpenAIConfig> =
                                 NanoGPT::new(model.config.openai_compat.clone().unwrap().into())
                                     .with_model(model.endpoint_id.slash_id().0.clone());
-                            nano.stream(messages);
+
+                            let mut fmt = MessageFormatterStruct::new();
+                            for msg in messages {
+                                fmt.add_message(msg.clone());
+                            }
+                            let chain = LLMChainBuilder::new()
+                                .llm(nano)
+                                .prompt(fmt)
+                                .build()
+                                .unwrap();
+
+                            let vars = prompt_args! {};
+                            let mut stream = chain.stream(vars).await.unwrap();
+                            while let Some(result) = stream.next().await {
+                                match result {
+                                    Ok(data) => {
+                                        sender.send(Token::Talking(data.content)).await;
+                                    },
+                                    Err(e) => {
+                                        warn!("Error: {:?}", e);
+                                    }
+                                }
+                            }
                         }
                         _ => unimplemented!(),
                     }
@@ -412,7 +451,7 @@ impl Assistant {
                     let request = {
                         let messages: Vec<_> = [("system", system_prompt)]
                             .into_iter()
-                            .chain(messages.iter().chain(append).map(Message::to_tuple))
+                            .chain(messages.iter().chain(append).map(|k| unimplemented!()))
                             .map(|(role, content)| {
                                 json!({
                                     "role": role,
@@ -542,13 +581,13 @@ impl Backend {
 }
 
 #[derive(Debug, Clone)]
-pub enum Message {
+pub enum SimpleMessage {
     System(String),
     Assistant(String),
     User(String),
 }
 
-impl Message {
+impl SimpleMessage {
     pub fn to_tuple(&self) -> (&'static str, &str) {
         match self {
             Self::System(content) => ("system", content),

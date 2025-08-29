@@ -6,6 +6,7 @@ use crate::model;
 use crate::plan::{self, Plan};
 use crate::Error;
 
+use langchain_rust::schemas::Message;
 use serde::{Deserialize, Serialize};
 use sipper::{sipper, Sipper, Straw};
 use tokio::fs;
@@ -180,7 +181,7 @@ pub fn complete(
 
 fn reply<'a>(
     assistant: &'a Assistant,
-    messages: &'a [assistant::Message],
+    messages: &'a [Message],
 ) -> impl Straw<(), Event, Error> + 'a {
     sipper(move |mut sender| async move {
         let _ = sender.send(Event::ReplyAdded).await;
@@ -200,7 +201,7 @@ pub fn title(assistant: &Assistant, items: &[Item]) -> impl Straw<String, String
     let history = history(items);
 
     sipper(move |mut sender| async move {
-        let request = [assistant::Message::User(
+        let request = [Message::new_human_message(
             "Give me a short title for our conversation so far, \
                     without considering this interaction. \
                     Just the title between quotes; don't say anything else."
@@ -348,15 +349,15 @@ async fn storage_dir() -> Result<PathBuf, io::Error> {
     Ok(directory)
 }
 
-fn history(items: &[Item]) -> Vec<assistant::Message> {
+fn history(items: &[Item]) -> Vec<Message> {
     items
         .iter()
         .flat_map(|item| match item {
-            Item::User(query) => vec![assistant::Message::User(query.clone())],
-            Item::Reply(reply) => vec![assistant::Message::Assistant(reply.content.clone())],
+            Item::User(query) => vec![Message::new_human_message(query.clone())],
+            Item::Reply(reply) => vec![Message::new_ai_message(reply.content.clone())],
             Item::Plan(plan) => plan
                 .answers()
-                .map(|reply| assistant::Message::Assistant(reply.content.clone()))
+                .map(|reply| Message::new_ai_message(reply.content.clone()))
                 .collect(),
         })
         .collect()
