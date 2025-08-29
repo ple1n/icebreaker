@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use icebreaker_core as core;
 use icebreaker_core::model::APIAccess;
+use icebreaker_core::model::Library;
 use langchain_rust::document_loaders::dotenvy;
 use langchain_rust::llm::nanogpt::NanoGPT;
 use langchain_rust::llm::OpenAIConfig;
@@ -25,6 +26,7 @@ use iced::system;
 use iced::widget::{button, column, container, row, rule, vertical_rule, vertical_space, Text};
 use iced::{Element, Fill, Subscription, Task, Theme};
 
+use std::borrow::Cow;
 use std::mem;
 use std::sync::Arc;
 
@@ -45,8 +47,9 @@ struct Icebreaker {
     screen: Screen,
     last_conversation: Option<screen::Conversation>,
     system: Option<system::Information>,
-    library: model::Library,
+    library: Arc<model::Library>,
     theme: Theme,
+    settings: Settings,
 }
 
 #[derive(Debug, Clone)]
@@ -63,13 +66,14 @@ enum Message {
     OpenChats,
     OpenSearch,
     OpenSettings,
-    SettingsSaved(Result<(), Error>),
+    SettingsSaved(Result<Arc<Library>, Error>),
+    SettingsSavedNull(Result<(), Error>),
 }
 
 impl Icebreaker {
     pub fn new() -> (Self, Task<Message>) {
         let settings = Settings::fetch().unwrap_or_default();
-        let scan = model::Library::scan(settings.library);
+        let scan = model::Library::scan(settings.clone());
         let mut library = model::Library::default();
 
         let nano_config = OpenAIConfig::new()
@@ -84,9 +88,10 @@ impl Icebreaker {
         (
             Self {
                 screen: Screen::Loading,
-                library,
+                library: library.into(),
                 last_conversation: None,
                 system: None,
+                settings: settings.clone(),
                 theme: theme::from_data(&settings.theme),
             },
             Task::batch([
@@ -119,7 +124,6 @@ impl Icebreaker {
             Message::Loaded { last_chat, system } => {
                 let backend = assistant::Backend::detect(&system.graphics_adapter);
                 self.system = Some(*system);
-
                 match last_chat {
                     Ok(last_chat) => {
                         let (conversation, task) =
@@ -137,7 +141,7 @@ impl Icebreaker {
                 }
             }
             Message::Scanned(Ok(library)) => {
-                let old_library = std::mem::replace(&mut self.library, library);
+                let old_library = std::mem::replace(&mut self.library, Arc::from(library));
 
                 if old_library.directory() != self.library.directory() {
                     self.save_settings()
@@ -147,7 +151,11 @@ impl Icebreaker {
             }
             Message::Search(message) => {
                 if let Screen::Search(search) = &mut self.screen {
-                    let action = search.update(message);
+                    let action = search.update(
+                        message,
+                        Arc::<_>::make_mut(&mut self.library),
+                        &mut self.settings,
+                    );
 
                     match action {
                         search::Action::None => Task::none(),
@@ -166,6 +174,18 @@ impl Icebreaker {
                             self.last_conversation = None;
 
                             task.map(Message::Conversation)
+                        }
+                        search::Action::Bookmark(id) => {
+                            let lib = Arc::<_>::make_mut(&mut self.library);
+                            if !lib.bookmarks.contains(&id) {
+                                lib.bookmarks.push(id.clone());
+                            }
+                            Task::perform(
+                                self.library
+                                    .to_owned()
+                                    .save_bookmarks(self.settings.clone()),
+                                Message::SettingsSaved,
+                            )
                         }
                     }
                 } else {
@@ -191,20 +211,21 @@ impl Icebreaker {
                 }
             }
             Message::Settings(message) => {
-                let Screen::Settings(settings) = &mut self.screen else {
+                let Screen::Settings(screen_settings) = &mut self.screen else {
                     return Task::none();
                 };
 
-                match settings.update(message) {
+                match screen_settings.update(message) {
                     settings::Action::None => Task::none(),
                     settings::Action::ChangeTheme(theme) => {
                         self.theme = theme;
 
                         self.save_settings()
                     }
-                    settings::Action::ChangeLibraryFolder(library) => {
-                        Task::perform(model::Library::scan(library), Message::Scanned)
-                    }
+                    settings::Action::ChangeLibraryFolder(library) => Task::perform(
+                        model::Library::scan(self.settings.clone()),
+                        Message::Scanned,
+                    ),
                     settings::Action::Run(task) => task.map(Message::Settings),
                 }
             }
@@ -240,10 +261,18 @@ impl Icebreaker {
 
                 self.open_settings()
             }
-            Message::SettingsSaved(Ok(())) => Task::none(),
-            Message::Scanned(Err(error)) | Message::SettingsSaved(Err(error)) => {
+            Message::SettingsSaved(Ok(lib)) => {
+                self.library = lib;
+                Task::none()
+            }
+            Message::Scanned(Err(error))
+            | Message::SettingsSaved(Err(error))
+            | Message::SettingsSavedNull(Err(error)) => {
                 log::error!("{error}");
 
+                Task::none()
+            }
+            _ => {
                 Task::none()
             }
         }
@@ -365,7 +394,7 @@ impl Icebreaker {
 
         Task::batch([
             Task::perform(
-                model::Library::scan(self.library.directory().clone()),
+                model::Library::scan(self.settings.clone()),
                 Message::Scanned,
             ),
             task.map(Message::Search),
@@ -386,6 +415,6 @@ impl Icebreaker {
             theme: theme::to_data(&self.theme),
         };
 
-        Task::perform(settings.save(), Message::SettingsSaved)
+        Task::perform(settings.save(), Message::SettingsSavedNull)
     }
 }

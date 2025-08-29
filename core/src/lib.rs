@@ -1,4 +1,5 @@
 #![feature(error_generic_member_access)]
+#![feature(arbitrary_self_types)]
 
 pub mod assistant;
 pub mod chat;

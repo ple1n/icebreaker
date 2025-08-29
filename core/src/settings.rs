@@ -18,8 +18,9 @@ impl Settings {
     pub fn fetch() -> Result<Self, Error> {
         use std::fs;
 
+        warn!("config from {:?}", &Self::path());
+
         let config = fs::read_to_string(Self::path())?;
-        warn!("config from {}", &config);
         let config: Value = toml::from_str(&config)?;
 
         Ok(Self::decode(config)?)
@@ -63,6 +64,10 @@ impl Settings {
 
     fn path() -> PathBuf {
         directory::config().join("settings.toml")
+    }
+
+    pub fn bookmarks(&self) -> PathBuf  {
+        directory::config().join("bookmarks.json")
     }
 }
 

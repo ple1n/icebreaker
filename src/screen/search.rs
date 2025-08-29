@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -8,6 +9,7 @@ use crate::widget::sidebar;
 use crate::{icon, APIAccess};
 
 use icebreaker_core::model::{EndpointId, Library, ModelOnline, ModelsMap};
+use icebreaker_core::Settings;
 use iced::border;
 use iced::font;
 use iced::time::Duration;
@@ -44,7 +46,7 @@ pub enum Message {
     ToggleFilters,
     ToggleLocalModels(bool),
     ToggleOnlineModels(bool),
-    InstallAPI(model::EndpointId), // Add new message for installing API models
+    Bookmark(model::EndpointId), // Add new message for installing API models
 }
 
 pub enum Mode {
@@ -64,10 +66,11 @@ pub enum Action {
     None,
     Boot(model::FileAndAPI),
     Run(Task<Message>),
+    Bookmark(model::EndpointId),
 }
 
 impl Search {
-    pub fn new(lib: Library) -> (Self, Task<Message>) {
+    pub fn new(lib: Arc<Library>) -> (Self, Task<Message>) {
         let k = Self {
             models: HashMap::new(),
             search: String::new(),
@@ -98,7 +101,12 @@ impl Search {
         }
     }
 
-    pub fn update(&mut self, message: Message) -> Action {
+    pub fn update(
+        &mut self,
+        message: Message,
+        lib: &mut Library,
+        settings: &mut Settings,
+    ) -> Action {
         match message {
             Message::ModelsListed(Ok(models)) => {
                 self.models = models;
@@ -199,18 +207,16 @@ impl Search {
                 self.show_online_models = t;
                 Action::None
             }
-            Message::InstallAPI(id) => {
+            Message::Bookmark(id) => {
                 // Add model to local registry of favorited models
-                log::info!("Installing API model: {:?}", id);
+                log::info!("Adding API model: {:?}", id);
                 let ap = self.models.get(&id).unwrap();
                 let ap = match ap {
                     Model::API(ap) => ap,
                     _ => unreachable!(),
                 };
-                Action::Boot(model::FileAndAPI {
-                    api: Some(ap.clone()),
-                    ..Default::default()
-                })
+
+                Action::Bookmark(ap.endpoint_id.clone())
             }
         }
     }
@@ -313,12 +319,7 @@ impl Search {
                 .peekable();
 
             if filtered_models.peek().is_none() {
-                center(text(if self.is_searching || self.search_temperature > 0 {
-                    "Searching..."
-                } else {
-                    "No models found!"
-                }))
-                .into()
+                center(text("No models found")).into()
             } else {
                 let cards = grid(filtered_models.map(model_card))
                     .spacing(10)
@@ -468,9 +469,9 @@ impl Search {
             column![title, badges].spacing(10).align_x(Center)
         };
 
-        let install_button = button("Install")
+        let install_button = button("Bookmark")
             .padding([10, 20])
-            .on_press(Message::InstallAPI(model_online.endpoint_id.clone()))
+            .on_press(Message::Bookmark(model_online.endpoint_id.clone()))
             .style(|theme: &Theme, status| {
                 let palette = theme.extended_palette();
                 let base = button::primary(theme, status);
@@ -500,62 +501,57 @@ impl Search {
     pub fn sidebar<'a>(&'a self, library: &'a model::Library) -> Element<'a, Message> {
         let header = sidebar::header("Models", Some((icon::search(), Message::Back)));
 
-        if library.files.is_empty() {
-            return column![
-                header,
-                center(
-                    text("No models have been downloaded yet.\n\nFind some to start chatting →")
-                        .width(Fill)
-                        .center()
-                        .shaping(text::Shaping::Advanced)
-                )
-            ]
-            .spacing(10)
-            .into();
+        if library.bookmarks.is_empty() {
+            return column![header, center(icon::search().width(Fill).center())]
+                .spacing(10)
+                .into();
         }
 
-        let library = column(library.files.iter().map(|(fid, file)| {
+        let library = column(library.bookmarks.iter().map(|id| {
             use model::*;
 
-            let title: Element<'_, _> = match file {
-                FileOrAPI::API(a) => widget::text!("{:?}", &a.endpoint_id.slash_id()).into(),
-                FileOrAPI::File(f) => ellipsized_text(f.model.name())
+            let title: Element<'_, _> = match id {
+                EndpointId::Remote { api_type, id } => widget::text!("{:?}", &id.name()).into(),
+                EndpointId::Local(f) => ellipsized_text(f.name())
                     .font(Font::MONOSPACE)
                     .wrapping(text::Wrapping::None)
                     .into(),
             };
 
-            let author = match file {
-                FileOrAPI::API(a) => row![
+            let author = match id {
+                EndpointId::Remote { api_type, id } => row![
                     icon::cloud()
                         .size(10)
                         .line_height(1.0)
                         .style(text::secondary),
-                    text(format!("{:?}", &a.config.kind))
+                    text(format!("{:?}", &api_type))
                         .size(12)
                         .style(text::secondary),
                 ]
                 .spacing(5)
                 .align_y(Center),
-                FileOrAPI::File(f) => row![
+                EndpointId::Local(f) => row![
                     icon::user()
                         .size(10)
                         .line_height(1.0)
                         .style(text::secondary),
-                    text(f.model.author()).size(12).style(text::secondary),
+                    text(f.author()).size(12).style(text::secondary),
                 ]
                 .spacing(5)
                 .align_y(Center),
             };
 
-            let variant = match file {
-                FileOrAPI::API(a) => None,
-                FileOrAPI::File(file) => Some(file.variant().map(|variant| {
-                    text(variant)
-                        .font(Font::MONOSPACE)
-                        .size(12)
-                        .style(text::secondary)
-                })),
+            let variant = match id {
+                EndpointId::Remote { api_type, id } => None,
+                EndpointId::Local(_) => library.files.get(id).map(|file| match file {
+                    FileOrAPI::File(file) => Some(file.variant().map(|variant| {
+                        text(variant)
+                            .font(Font::MONOSPACE)
+                            .size(12)
+                            .style(text::secondary)
+                    })),
+                    _ => unreachable!(),
+                }),
             };
 
             let entry = column![
@@ -567,21 +563,15 @@ impl Search {
             .spacing(2);
 
             let is_active = match &self.mode {
-                Mode::HFDetails { model, .. } => match file {
-                    FileOrAPI::File(f) => model == &f.endpoint(),
-                    _ => false,
-                },
+                Mode::HFDetails { model, .. } => model == id,
                 Mode::APIDetails {
                     model,
                     model_online,
-                } => match file {
-                    FileOrAPI::API(a) => a == model_online,
-                    _ => false,
-                },
+                } => model == id,
                 _ => false,
             };
 
-            sidebar::item(entry, is_active, || Message::Select(fid.clone()))
+            sidebar::item(entry, is_active, || Message::Select(id.clone()))
         }));
 
         column![header, scrollable(library).spacing(10).height(Fill)]

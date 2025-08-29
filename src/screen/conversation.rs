@@ -500,7 +500,7 @@ impl Conversation {
                 horizontal_space().into()
             };
 
-            let bar = hover(center_x(title).padding([0, 40]), right_center(delete));
+            let t_bar = hover(center_x(title).padding([0, 40]), right_center(delete));
 
             match &self.state {
                 State::Booting {
@@ -571,9 +571,9 @@ impl Conversation {
                         tooltip::Position::Bottom,
                     );
 
-                    stack![bar, right_center(progress)].into()
+                    stack![t_bar, right_center(progress)].into()
                 }
-                State::Running { .. } => bar,
+                State::Running { .. } => t_bar,
             }
         };
 
@@ -719,8 +719,13 @@ impl Conversation {
 
         let chats = column(self.chats.iter().map(|chat| {
             let card = match &chat.title {
-                Some(title) => ellipsized_text(title),
-                None => ellipsized_text(chat.file.slash_id().name()).font(Font::MONOSPACE),
+                Some(title) => {
+                    let mut t = title.to_owned();
+                    t = t.chars().take(20).collect();
+
+                    ellipsized_text(t)
+                }
+                None => ellipsized_text(chat.file.slash_id().0.clone()).font(Font::MONOSPACE),
             }
             .wrapping(text::Wrapping::None);
 

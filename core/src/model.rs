@@ -2,15 +2,18 @@ use crate::directory;
 use crate::model;
 use crate::request;
 use crate::Error;
+use crate::Settings;
 
 use decoder::{decode, encode, Value};
 use langchain_rust::llm::nanogpt::NanoGPT;
 use langchain_rust::llm::OpenAIConfig;
 use langchain_rust::llm::OpenAIConfigSerde;
+use log::info;
 use serde::{Deserialize, Serialize};
 use sipper::{sipper, Sipper, Straw};
 use tokio::fs;
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -86,10 +89,10 @@ impl Quantity {
 pub type ModelsMap = HashMap<model::EndpointId, Model>;
 
 impl Model {
-    pub async fn list(api: Library) -> Result<ModelsMap, Error> {
+    pub async fn list(api: Arc<Library>) -> Result<ModelsMap, Error> {
         let mut resp = ModelsMap::new();
 
-        for (id, api) in api.api_src {
+        for (id, api) in api.api_src.iter() {
             match &api.kind {
                 APIType::NanoGPT => {
                     let nanogpt: NanoGPT<OpenAIConfig> =
@@ -359,6 +362,7 @@ impl FileAndAPI {
     pub async fn list(directory: &Directory) -> Result<Vec<Self>, Error> {
         let mut models = Vec::new();
         let dir = directory.as_ref();
+        fs::create_dir_all(dir).await?;
         let mut entries = fs::read_dir(dir).await?;
 
         while let Some(entry) = entries.next_entry().await? {
@@ -422,7 +426,10 @@ impl File {
             }
 
             let file_stem = entry.path.trim_end_matches(".gguf");
-            let variant = file_stem.rsplit(['-', '.']).next().unwrap_or(file_stem);
+            let variant = file_stem
+                .rsplit(['-', '.'])
+                .next()
+                .unwrap_or(file_stem);
             let precision = variant
                 .split('_')
                 .next()
@@ -585,6 +592,14 @@ pub struct Library {
     directory: Directory,
     pub api_src: HashMap<APIType, APIAccess>,
     pub files: HashMap<EndpointId, FileOrAPI>,
+    pub bookmarks: Vec<EndpointId>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+pub struct APIBookmarks {
+    pub api_src: HashMap<APIType, APIAccess>,
+    pub apis: HashMap<EndpointId, ModelOnline>,
+    pub bookmarks: Vec<EndpointId>,
 }
 
 #[derive(Hash, PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
@@ -603,9 +618,14 @@ impl EndpointId {
 }
 
 impl Library {
-    pub async fn scan(directory: impl AsRef<Path>) -> Result<Self, Error> {
+    pub async fn scan(settings: Settings) -> Result<Self, Error> {
+        let directory = &settings.library;
+        let bookmarks_file = settings.bookmarks();
+
         let mut files: HashMap<EndpointId, FileOrAPI> = HashMap::new();
         let directory = directory.as_ref();
+        fs::create_dir_all(directory).await?;
+        
         let mut list = fs::read_dir(directory).await?;
 
         while let Some(author) = list.next_entry().await? {
@@ -645,11 +665,40 @@ impl Library {
             }
         }
 
+        info!("reading {:?}", &bookmarks_file);
+        let bookmarks: APIBookmarks = match fs::read_to_string(&bookmarks_file).await {
+            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+            Err(_) => Default::default(),
+        };
+
         Ok(Self {
             directory: Directory(directory.to_path_buf()),
-            files,
-            api_src: Default::default(),
+            files: bookmarks.apis.into_iter()
+                .map(|(id, api)| (id, FileOrAPI::API(api)))
+                .chain(files)
+                .collect(),
+            api_src: bookmarks.api_src,
+            bookmarks: bookmarks.bookmarks,
         })
+    }
+
+    pub async fn save_bookmarks(self: Arc<Self>, settings: Settings) -> Result<Arc<Self>, Error> {
+        let bookmarks_file = settings.bookmarks();
+        let api_bookmarks = APIBookmarks {
+            api_src: self.api_src.clone(),
+            apis: self.files.iter()
+                .filter_map(|(id, file_or_api)| match file_or_api {
+                    FileOrAPI::API(api) => Some((id.clone(), api.clone())),
+                    _ => None,
+                })
+                .collect(),
+            bookmarks: self.bookmarks.clone(),
+        };
+        let json = serde_json::to_string_pretty(&api_bookmarks)?;
+        info!("writing bookmarks to {:?}", &bookmarks_file);
+        fs::write(bookmarks_file, json).await?;
+
+        Ok(self)
     }
 
     pub fn directory(&self) -> &Directory {

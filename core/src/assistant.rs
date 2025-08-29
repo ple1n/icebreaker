@@ -423,6 +423,9 @@ impl Assistant {
                             for msg in messages {
                                 fmt.add_message(msg.clone());
                             }
+                            for msg in append {
+                                fmt.add_message(msg.clone());
+                            }
                             let chain = LLMChainBuilder::new()
                                 .llm(nano)
                                 .prompt(fmt)

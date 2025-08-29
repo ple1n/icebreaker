@@ -7,6 +7,7 @@ use crate::plan::{self, Plan};
 use crate::Error;
 
 use langchain_rust::schemas::Message;
+use log::info;
 use serde::{Deserialize, Serialize};
 use sipper::{sipper, Sipper, Straw};
 use tokio::fs;
@@ -202,9 +203,8 @@ pub fn title(assistant: &Assistant, items: &[Item]) -> impl Straw<String, String
 
     sipper(move |mut sender| async move {
         let request = [Message::new_human_message(
-            "Give me a short title for our conversation so far, \
-                    without considering this interaction. \
-                    Just the title between quotes; don't say anything else."
+            "Give me a very short title for our conversation so far, \
+                    without considering this interaction. Output in quotes, immediately and nothing else: "
                 .to_owned(),
         )];
 
@@ -215,18 +215,19 @@ pub fn title(assistant: &Assistant, items: &[Item]) -> impl Straw<String, String
         }
 
         let mut completion = assistant.complete(SYSTEM_PROMPT, &history, &request).pin();
-
         while let Some(token) = completion.sip().await {
+            info!("{:?}", &token);
+
             if let Token::Talking(token) = token {
                 title.push_str(&token);
             }
 
-            let is_too_long = title.len() > 80;
+            let is_too_long = title.len() > 30;
 
             if is_too_long {
                 title.push_str("...");
+                break;
             }
-
             sender.send(sanitize(&title)).await;
         }
 
