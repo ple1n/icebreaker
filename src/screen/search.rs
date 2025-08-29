@@ -5,9 +5,9 @@ use crate::core::model;
 use crate::core::{Error, HFModel};
 use crate::model::Model;
 use crate::widget::sidebar;
-use crate::{icon, APIs};
+use crate::{icon, APIAccess};
 
-use icebreaker_core::model::{EndpointId, ModelOnline};
+use icebreaker_core::model::{EndpointId, Library, ModelOnline};
 use iced::border;
 use iced::font;
 use iced::time::Duration;
@@ -21,7 +21,7 @@ use iced_palace::widget::ellipsized_text;
 use function::Binary;
 
 pub struct Search {
-    models: HashMap<model::Id, Model>,
+    models: HashMap<model::EndpointId, Model>,
     search: String,
     search_temperature: usize,
     is_searching: bool,
@@ -29,7 +29,6 @@ pub struct Search {
     show_filters: bool,
     show_local_models: bool,
     show_online_models: bool,
-    api: Arc<APIs>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,26 +36,26 @@ pub enum Message {
     ModelsListed(Result<Vec<Model>, Error>),
     SearchChanged(String),
     SearchCooled,
-    Select(model::Id),
-    HFDetailsFetched(model::Id, Result<model::Details, Error>),
-    FilesListed(model::Id, Result<model::Files, Error>),
+    Select(model::EndpointId),
+    HFDetailsFetched(model::EndpointId, Result<model::Details, Error>),
+    FilesListed(model::EndpointId, Result<model::Files, Error>),
     Boot(model::FileAndAPI),
     Back,
     ToggleFilters,
     ToggleLocalModels(bool),
     ToggleOnlineModels(bool),
-    InstallAPI(model::Id), // Add new message for installing API models
+    InstallAPI(model::EndpointId), // Add new message for installing API models
 }
 
 pub enum Mode {
     Search,
     HFDetails {
-        model: model::Id,
+        model: model::EndpointId,
         details: Option<model::Details>,
         files: Option<model::Files>,
     },
     APIDetails {
-        model: model::Id,
+        model: model::EndpointId,
         model_online: ModelOnline,
     },
 }
@@ -68,7 +67,7 @@ pub enum Action {
 }
 
 impl Search {
-    pub fn new(api: Arc<APIs>) -> (Self, Task<Message>) {
+    pub fn new(lib: Library) -> (Self, Task<Message>) {
         let k = Self {
             models: HashMap::new(),
             search: String::new(),
@@ -78,12 +77,11 @@ impl Search {
             show_filters: false,
             show_local_models: false,
             show_online_models: true,
-            api: api.clone(),
         };
         (
             k,
             Task::batch([
-                Task::perform(Model::list(api), Message::ModelsListed),
+                Task::perform(Model::list(lib), Message::ModelsListed),
                 widget::focus_next(),
             ]),
         )
@@ -92,11 +90,11 @@ impl Search {
     pub fn title(&self) -> &str {
         match &self.mode {
             Mode::Search => "Models",
-            Mode::HFDetails { model, .. } => model.name(),
+            Mode::HFDetails { model, .. } => model.slash_id().name(),
             Mode::APIDetails {
                 model,
                 model_online,
-            } => model.name(),
+            } => model.slash_id().name(),
         }
     }
 
@@ -105,7 +103,7 @@ impl Search {
             Message::ModelsListed(Ok(models)) => {
                 self.models = models
                     .into_iter()
-                    .map(|model| (model.slash_id().clone(), model))
+                    .map(|model| (model.endpoint_id(), model))
                     .collect();
                 self.is_searching = false;
 
@@ -155,7 +153,7 @@ impl Search {
                                     Message::HFDetailsFetched.with(id.clone()),
                                 ),
                                 Task::perform(
-                                    model::File::list(id.clone()),
+                                    model::File::list(id.slash_id().clone()),
                                     Message::FilesListed.with(id.clone()),
                                 ),
                             ]))
@@ -239,11 +237,11 @@ impl Search {
                 model,
                 details,
                 files,
-            } => self.details(model, details.as_ref(), files.as_ref(), library),
+            } => self.details(model.slash_id(), details.as_ref(), files.as_ref(), library),
             Mode::APIDetails {
                 model,
                 model_online,
-            } => self.details_api(model, model_online),
+            } => self.details_api(model_online),
         }
     }
 
@@ -429,7 +427,6 @@ impl Search {
 
     pub fn details_api<'a>(
         &self,
-        model: &'a model::Id,
         model_online: &'a ModelOnline,
     ) -> Element<'a, Message> {
         use iced::widget::Text;
@@ -456,9 +453,9 @@ impl Search {
         let header = {
             let title = center_x(
                 row![
-                    text(model.author()).size(18),
+                    text(model_online.endpoint_id.slash_id().author()).size(18),
                     text("/").size(18),
-                    ellipsized_text(model.name())
+                    ellipsized_text(model_online.endpoint_id.slash_id().name())
                         .size(20)
                         .font(Font {
                             weight: font::Weight::Semibold,
@@ -471,7 +468,7 @@ impl Search {
             );
 
             let badges = row![
-                badge(icon::cloud(), text(format!("{:?}", model_online.api_type))),
+                badge(icon::cloud(), text(format!("{:?}", model_online.config.kind))),
                 model_online.cost.as_ref().map(|cost| {
                     row![
                         badge(icon::dollar(), value(cost.prompt.clone())),
@@ -488,7 +485,7 @@ impl Search {
 
         let install_button = button("Install")
             .padding([10, 20])
-            .on_press(Message::InstallAPI(model.clone()))
+            .on_press(Message::InstallAPI(model_online.endpoint_id.clone()))
             .style(|theme: &Theme, status| {
                 let palette = theme.extended_palette();
                 let base = button::primary(theme, status);
@@ -536,7 +533,7 @@ impl Search {
             use model::*;
 
             let title: Element<'_, _> = match file {
-                FileOrAPI::API(a) => widget::text!("{:?}", &a.id).into(),
+                FileOrAPI::API(a) => widget::text!("{:?}", &a.endpoint_id.slash_id()).into(),
                 FileOrAPI::File(f) => ellipsized_text(f.model.name())
                     .font(Font::MONOSPACE)
                     .wrapping(text::Wrapping::None)
@@ -549,7 +546,7 @@ impl Search {
                         .size(10)
                         .line_height(1.0)
                         .style(text::secondary),
-                    text(format!("{:?}", &a.api_type))
+                    text(format!("{:?}", &a.config.kind))
                         .size(12)
                         .style(text::secondary),
                 ]
@@ -586,7 +583,7 @@ impl Search {
 
             let is_active = match &self.mode {
                 Mode::HFDetails { model, .. } => match file {
-                    FileOrAPI::File(f) => model == &f.model,
+                    FileOrAPI::File(f) => model == &f.endpoint(),
                     _ => false,
                 },
                 Mode::APIDetails {
@@ -600,7 +597,7 @@ impl Search {
             };
 
             sidebar::item(entry, is_active, || {
-                Message::Select(file.slash_id().clone())
+                Message::Select(fid.clone())
             })
         }));
 
@@ -674,19 +671,19 @@ fn model_card(model: &Model) -> Element<'_, Message> {
                         },
                     }
                 })
-                .on_press_with(|| Message::Select(model.id.clone()))
+                .on_press_with(|| Message::Select(model.endpoint_id()))
                 .into()
         }
         Model::API(model) => {
-            let title = ellipsized_text(model.id.name())
+            let title = ellipsized_text(model.endpoint_id.slash_id().name())
                 .font(Font::MONOSPACE)
                 .wrapping(text::Wrapping::None);
 
             let metadata = row![
-                stat(icon::user(), text(model.id.author()), text::secondary),
+                stat(icon::user(), text(model.endpoint_id.slash_id().author()), text::secondary),
                 stat(
                     icon::cloud(),
-                    text(format!("{:?}", model.api_type)),
+                    text(format!("{:?}", model.config.kind)),
                     text::secondary,
                 ),
                 model.cost.as_ref().map(|cost| {
@@ -732,7 +729,7 @@ fn model_card(model: &Model) -> Element<'_, Message> {
                         },
                     }
                 })
-                .on_press_with(|| Message::Select(model.id.clone()))
+                .on_press_with(|| Message::Select(model.endpoint_id.clone()))
                 .into()
         }
     }
@@ -749,7 +746,7 @@ pub fn view_files<'a>(
         library: &'a model::Library,
     ) -> Option<Element<'a, Message>> {
         let variant = file.variant()?;
-        let is_ready = library.files.contains_key(&EndpointId::from_file(file));
+        let is_ready = library.files.contains_key(&file.endpoint());
 
         Some(
             button(

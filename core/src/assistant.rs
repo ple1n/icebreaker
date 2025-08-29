@@ -1,4 +1,6 @@
 use crate::model;
+use crate::model::APIType;
+use crate::model::EndpointId;
 use crate::Error;
 
 use serde::Deserialize;
@@ -388,7 +390,11 @@ impl Assistant {
     ) -> impl Straw<(), Token, Error> + 'a {
         sipper(move |mut sender| async move {
             match self._server.as_ref() {
-                Server::API => {}
+                Server::API => {
+                    let model = self.file.api.as_ref().unwrap();
+                    let lib = self.lib.files.get(&model.endpoint_id).unwrap();
+
+                }
                 Server::Process(_) | Server::Container(_) => {
                     let client = reqwest::Client::new();
 

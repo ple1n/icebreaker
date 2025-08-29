@@ -5,6 +5,7 @@ use crate::Error;
 use decoder::{decode, encode, Value};
 use langchain_rust::llm::nanogpt::NanoGPT;
 use langchain_rust::llm::OpenAIConfig;
+use langchain_rust::llm::OpenAIConfigSerde;
 use serde::{Deserialize, Serialize};
 use sipper::{sipper, Sipper, Straw};
 use tokio::fs;
@@ -17,9 +18,10 @@ use std::sync::Arc;
 const HF_URL: &str = "https://huggingface.co";
 const API_URL: &str = "https://huggingface.co/api";
 
-#[derive(Debug, Clone, Default)]
-pub struct APIs {
-    pub nano: Option<OpenAIConfig>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct APIAccess {
+    pub openai_compat: Option<OpenAIConfigSerde>,
+    pub kind: APIType,
 }
 
 #[derive(Debug, Clone)]
@@ -32,9 +34,10 @@ pub struct HFModel {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelOnline {
-    pub api_type: APIType,
+    pub endpoint_id: EndpointId,
     pub cost: Option<Cost>,
-    pub id: Id,
+    /// All the information needed to access this API
+    pub config: APIAccess,
 }
 
 #[derive(Debug, Clone)]
@@ -43,12 +46,13 @@ pub enum Model {
     API(ModelOnline),
 }
 
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum APIType {
     /// Dispatches to nanogpt impl in async_openai
     NanoGPT,
     OpenAI,
+    #[default]
+    OpenAICompatible,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,40 +83,59 @@ impl Quantity {
 }
 
 impl Model {
-    pub async fn list(api: Arc<APIs>) -> Result<Vec<Self>, Error> {
-        if let Some(nano) = api.nano.clone() {
-            let nanogpt = NanoGPT::new(nano);
-            let models = nanogpt.get_models(true).await?;
-            return Ok(models
-                .data
-                .into_iter()
-                .map(|m| {
-                    Model::API(ModelOnline {
-                        api_type: APIType::NanoGPT,
-                        cost: m.pricing.as_ref().map(|p| Cost {
-                            prompt: Quantity::usd_per_1m(p.prompt),
-                            completion: Quantity::usd_per_1m(p.completion),
-                        }),
-                        id: Id(m.id),
-                    })
-                })
-                .collect());
+    pub async fn list(api: Library) -> Result<Vec<Self>, Error> {
+        let mut resp = Vec::new();
+
+        for (id, api) in api.api_src {
+            match &api.kind {
+                APIType::NanoGPT => {
+                    let nanogpt: NanoGPT<OpenAIConfig> =
+                        NanoGPT::new(api.openai_compat.clone().unwrap().into());
+                    let models = nanogpt.get_models(true).await?;
+                    resp.extend(models.data.into_iter().map(|m| {
+                        Model::API(ModelOnline {
+                            endpoint_id: EndpointId::Remote {
+                                api_type: APIType::NanoGPT,
+                                id: Id(m.id),
+                            },
+                            cost: m.pricing.as_ref().map(|p| Cost {
+                                prompt: Quantity::usd_per_1m(p.prompt),
+                                completion: Quantity::usd_per_1m(p.completion),
+                            }),
+                            config: api.clone(),
+                        })
+                    }));
+                }
+                _ => todo!(),
+            }
         }
-        Ok(vec![])
+
+        Ok(resp)
     }
     /// Return ID of the form repo/name
     pub fn slash_id(&self) -> &Id {
         match &self {
-            Self::API(m) => &m.id,
+            Self::API(m) => m.endpoint_id.slash_id(),
             Self::HF(m) => &m.id,
         }
     }
     pub async fn search(_query: String) -> Result<Vec<Self>, Error> {
         Ok(vec![])
     }
+
+    pub fn endpoint_id(&self) -> EndpointId {
+        match self {
+            Self::HF(m) => EndpointId::Local(m.id.clone()),
+            Self::API(m) => m.endpoint_id.clone(),
+        }
+    }
 }
 
 impl HFModel {
+    pub fn endpoint_id(&self) -> EndpointId {
+        EndpointId::Local(self.id.clone())
+    }
+
     pub async fn list() -> Result<Vec<Self>, Error> {
         Self::search(String::new()).await
     }
@@ -197,7 +220,12 @@ pub struct Details {
 }
 
 impl Details {
-    pub async fn fetch(id: Id) -> Result<Self, Error> {
+    pub async fn fetch(id: EndpointId) -> Result<Self, Error> {
+        let id = match id {
+            EndpointId::Local(d) => d,
+            _ => unreachable!(),
+        };
+
         #[derive(Deserialize)]
         struct Response {
             #[serde(rename = "lastModified")]
@@ -280,9 +308,9 @@ pub struct File {
     pub size: Option<Size>,
 }
 
-impl EndpointId {
-    pub fn from_file(f: &File) -> Self {
-        Self::Local(f.model.clone())
+impl File {
+    pub fn endpoint(&self) -> EndpointId {
+        EndpointId::Local(self.model.clone())
     }
 }
 
@@ -295,7 +323,7 @@ pub struct FileAndAPI {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FileOrAPI {
     File(File),
-    API(ModelOnline)
+    API(ModelOnline),
 }
 
 impl FileAndAPI {
@@ -303,7 +331,7 @@ impl FileAndAPI {
         if let Some(f) = &self.file {
             &f.model
         } else if let Some(a) = &self.api {
-            &a.id
+            a.endpoint_id.slash_id()
         } else {
             panic!("FileOrAPI is empty");
         }
@@ -312,7 +340,7 @@ impl FileAndAPI {
 
 impl PartialEq for ModelOnline {
     fn eq(&self, other: &Self) -> bool {
-        self.api_type == other.api_type && self.id == other.id
+        self.endpoint_id == other.endpoint_id
     }
 }
 
@@ -329,7 +357,10 @@ impl FileAndAPI {
             if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
                 let content = fs::read_to_string(&path).await?;
                 let model_online: ModelOnline = serde_json::from_str(&content)?;
-                models.push(FileAndAPI { file: None, api: Some(model_online) });
+                models.push(FileAndAPI {
+                    file: None,
+                    api: Some(model_online),
+                });
             }
         }
 
@@ -342,16 +373,20 @@ impl FileAndAPI {
     ) -> impl Straw<PathBuf, request::Progress, Error> + 'a {
         sipper(async move |sender| match self {
             FileAndAPI { api: Some(ap), .. } => {
-                let json_path = directory
-                    .0
-                    .join(format!("{}.json", ap.id.0.replace('/', "_")));
+                let id = match &ap.endpoint_id {
+                    EndpointId::Local(id) => id,
+                    EndpointId::Remote { id, .. } => id,
+                };
+                let json_path = directory.0.join(format!("{}.json", id.0.replace('/', "_")));
                 if !json_path.exists() {
                     let json_content = serde_json::to_string_pretty(ap)?;
                     fs::write(&json_path, json_content).await?;
                 }
                 Ok(json_path)
             }
-            FileAndAPI { file: Some(file), .. } => file.download(directory, sender).await,
+            FileAndAPI {
+                file: Some(file), ..
+            } => file.download(directory, sender).await,
             _ => Err(std::io::Error::new(std::io::ErrorKind::Other, "FileOrAPI is empty").into()),
         })
     }
@@ -539,14 +574,23 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Default)]
 pub struct Library {
     directory: Directory,
+    pub api_src: HashMap<APIType, APIAccess>,
     pub files: HashMap<EndpointId, FileOrAPI>,
-    pub config: APIs
 }
 
-#[derive(Hash, PartialEq, Eq, Debug, Clone)]
+#[derive(Hash, PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub enum EndpointId {
     Local(Id),
     Remote { api_type: APIType, id: Id },
+}
+
+impl EndpointId {
+    pub fn slash_id(&self) -> &Id {
+        match self {
+            Self::Local(id) => id,
+            Self::Remote { id, .. } => id,
+        }
+    }
 }
 
 impl Library {
@@ -595,7 +639,7 @@ impl Library {
         Ok(Self {
             directory: Directory(directory.to_path_buf()),
             files,
-            config: Default::default()
+            api_src: Default::default(),
         })
     }
 
@@ -647,7 +691,7 @@ impl FileOrAPI {
     pub fn slash_id(&self) -> &Id {
         match self {
             Self::File(f) => &f.model,
-            Self::API(a) => &a.id,
+            Self::API(a) => a.endpoint_id.slash_id(),
         }
     }
 }

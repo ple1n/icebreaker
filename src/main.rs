@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use icebreaker_core as core;
-use icebreaker_core::model::APIs;
+use icebreaker_core::model::APIAccess;
 use langchain_rust::document_loaders::dotenvy;
 use langchain_rust::llm::nanogpt::NanoGPT;
 use langchain_rust::llm::OpenAIConfig;
@@ -75,10 +75,11 @@ impl Icebreaker {
         let nano_config = OpenAIConfig::new()
             .with_api_base("https://nano-gpt.com/api/v1")
             .with_api_key(dotenvy::var("NANOGPT_KEY").expect("provide key"));
-        let api = APIs {
-            nano: Some(nano_config),
+        let api = APIAccess {
+            openai_compat: Some(nano_config.into()),
+            kind: model::APIType::NanoGPT,
         };
-        library.config = api;
+        let _ = library.api_src.insert(model::APIType::NanoGPT, api);
 
         (
             Self {
@@ -358,7 +359,7 @@ impl Icebreaker {
     }
 
     fn open_search(&mut self) -> Task<Message> {
-        let (search, task) = screen::Search::new(self.library.config.clone().into());
+        let (search, task) = screen::Search::new(self.library.clone());
 
         self.screen = Screen::Search(search);
 
