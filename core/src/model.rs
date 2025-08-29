@@ -17,6 +17,7 @@ use std::sync::Arc;
 const HF_URL: &str = "https://huggingface.co";
 const API_URL: &str = "https://huggingface.co/api";
 
+#[derive(Debug, Clone, Default)]
 pub struct APIs {
     pub nano: Option<OpenAIConfig>,
 }
@@ -41,6 +42,7 @@ pub enum Model {
     HF(HFModel),
     API(ModelOnline),
 }
+
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum APIType {
@@ -528,6 +530,7 @@ use std::collections::HashMap;
 pub struct Library {
     directory: Directory,
     pub files: HashMap<EndpointId, FileOrAPI>,
+    pub config: APIs
 }
 
 #[derive(Hash, PartialEq, Eq, Debug, Clone)]
@@ -582,6 +585,7 @@ impl Library {
         Ok(Self {
             directory: Directory(directory.to_path_buf()),
             files,
+            config: Default::default()
         })
     }
 

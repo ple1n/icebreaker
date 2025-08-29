@@ -219,7 +219,12 @@ impl Search {
             Message::InstallAPI(id) => {
                 // Add model to local registry of favorited models
                 log::info!("Installing API model: {:?}", id);
-                Action::None
+                let ap = self.models.get(&id).unwrap();
+                let ap = match ap {
+                    Model::API(ap) => ap,
+                    _ => unreachable!(),
+                };
+                Action::Boot(model::FileOrAPI::API(ap.clone()))
             }
         }
     }

@@ -1,6 +1,7 @@
 use crate::model;
 use crate::Error;
 
+use log::warn;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
@@ -16,6 +17,7 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone)]
 pub struct Assistant {
     pub file: model::FileOrAPI,
+    lib: model::Library,
     _server: Arc<Server>,
 }
 
@@ -27,7 +29,7 @@ impl Assistant {
     const HOST_PORT: u64 = 8080;
 
     pub fn boot(
-        directory: model::Directory,
+        lib: model::Library,
         file: model::FileOrAPI,
         backend: Backend,
     ) -> impl Straw<Self, BootEvent, Error> {
@@ -50,11 +52,14 @@ impl Assistant {
         }
 
         sipper(move |sender| async move {
+            let directory = lib.directory();
+
             let file = match file {
                 model::FileOrAPI::File(f) => f,
                 model::FileOrAPI::API(ap) => {
                     return Ok(Self {
                         file: model::FileOrAPI::API(ap),
+                        lib,
                         _server: Server::API.into(),
                     });
                 }
@@ -293,6 +298,7 @@ impl Assistant {
 
                 return Ok(Self {
                     file: model::FileOrAPI::File(file),
+                    lib,
                     _server: Arc::new(server),
                 });
             }
@@ -375,102 +381,107 @@ impl Assistant {
         append: &'a [Message],
     ) -> impl Straw<(), Token, Error> + 'a {
         sipper(move |mut sender| async move {
-            let client = reqwest::Client::new();
+            match &self.file {
+                model::FileOrAPI::API(api) => {}
+                model::FileOrAPI::File(local) => {
+                    let client = reqwest::Client::new();
 
-            let request = {
-                let messages: Vec<_> = [("system", system_prompt)]
-                    .into_iter()
-                    .chain(messages.iter().chain(append).map(Message::to_tuple))
-                    .map(|(role, content)| {
-                        json!({
-                            "role": role,
-                            "content": content
-                        })
-                    })
-                    .collect();
+                    let request = {
+                        let messages: Vec<_> = [("system", system_prompt)]
+                            .into_iter()
+                            .chain(messages.iter().chain(append).map(Message::to_tuple))
+                            .map(|(role, content)| {
+                                json!({
+                                    "role": role,
+                                    "content": content
+                                })
+                            })
+                            .collect();
 
-                client
-                    .post(format!(
-                        "http://localhost:{port}/v1/chat/completions",
-                        port = Self::HOST_PORT
-                    ))
-                    .json(&json!({
-                        "model": format!("{model}", model = self.name()),
-                        "messages": messages,
-                        "stream": true,
-                        "cache_prompt": true,
-                    }))
-            };
+                        client
+                            .post(format!(
+                                "http://localhost:{port}/v1/chat/completions",
+                                port = Self::HOST_PORT
+                            ))
+                            .json(&json!({
+                                "model": format!("{model}", model = self.name()),
+                                "messages": messages,
+                                "stream": true,
+                                "cache_prompt": true,
+                            }))
+                    };
 
-            let mut response = request.send().await?.error_for_status()?;
-            let mut buffer = Vec::new();
-            let mut is_reasoning = None;
+                    let mut response = request.send().await?.error_for_status()?;
+                    let mut buffer = Vec::new();
+                    let mut is_reasoning = None;
 
-            while let Some(chunk) = response.chunk().await? {
-                buffer.extend(chunk);
+                    while let Some(chunk) = response.chunk().await? {
+                        buffer.extend(chunk);
 
-                let mut lines = buffer
-                    .split(|byte| *byte == 0x0A)
-                    .filter(|bytes| !bytes.is_empty());
+                        let mut lines = buffer
+                            .split(|byte| *byte == 0x0A)
+                            .filter(|bytes| !bytes.is_empty());
 
-                let last_line = if buffer.ends_with(&[0x0A]) {
-                    &[]
-                } else {
-                    lines.next_back().unwrap_or_default()
-                };
+                        let last_line = if buffer.ends_with(&[0x0A]) {
+                            &[]
+                        } else {
+                            lines.next_back().unwrap_or_default()
+                        };
 
-                for line in lines {
-                    if let Ok(data) = std::str::from_utf8(line) {
-                        #[derive(Deserialize)]
-                        struct Data {
-                            choices: Vec<Choice>,
-                        }
-
-                        #[derive(Deserialize)]
-                        struct Choice {
-                            delta: Delta,
-                        }
-
-                        #[derive(Deserialize)]
-                        struct Delta {
-                            content: Option<String>,
-                        }
-
-                        if data == "data: [DONE]" {
-                            break;
-                        }
-
-                        let mut data: Data = serde_json::from_str(
-                            data.trim().strip_prefix("data: ").unwrap_or(data),
-                        )?;
-
-                        if let Some(choice) = data.choices.first_mut() {
-                            if let Some(content) = &mut choice.delta.content {
-                                match is_reasoning {
-                                    None if content.contains("<think>") => {
-                                        is_reasoning = Some(true);
-                                        *content = content.replace("<think>", "");
-                                    }
-                                    Some(true) if content.contains("</think>") => {
-                                        is_reasoning = Some(false);
-                                        *content = content.replace("</think>", "");
-                                    }
-                                    _ => {}
+                        for line in lines {
+                            if let Ok(data) = std::str::from_utf8(line) {
+                                #[derive(Deserialize)]
+                                struct Data {
+                                    choices: Vec<Choice>,
                                 }
 
-                                let _ = sender
-                                    .send(if is_reasoning.unwrap_or_default() {
-                                        Token::Reasoning(content.clone())
-                                    } else {
-                                        Token::Talking(content.clone())
-                                    })
-                                    .await;
-                            }
-                        }
-                    };
-                }
+                                #[derive(Deserialize)]
+                                struct Choice {
+                                    delta: Delta,
+                                }
 
-                buffer = last_line.to_vec();
+                                #[derive(Deserialize)]
+                                struct Delta {
+                                    content: Option<String>,
+                                }
+
+                                if data == "data: [DONE]" {
+                                    break;
+                                }
+
+                                let mut data: Data = serde_json::from_str(
+                                    data.trim().strip_prefix("data: ").unwrap_or(data),
+                                )?;
+
+                                if let Some(choice) = data.choices.first_mut() {
+                                    if let Some(content) = &mut choice.delta.content {
+                                        match is_reasoning {
+                                            None if content.contains("<think>") => {
+                                                is_reasoning = Some(true);
+                                                *content = content.replace("<think>", "");
+                                            }
+                                            Some(true) if content.contains("</think>") => {
+                                                is_reasoning = Some(false);
+                                                *content = content.replace("</think>", "");
+                                            }
+                                            _ => {}
+                                        }
+
+                                        let _ = sender
+                                            .send(if is_reasoning.unwrap_or_default() {
+                                                Token::Reasoning(content.clone())
+                                            } else {
+                                                Token::Talking(content.clone())
+                                            })
+                                            .await;
+                                    }
+                                }
+                            };
+                        }
+
+                        buffer = last_line.to_vec();
+                    }
+                }
             }
 
             Ok(())

@@ -22,6 +22,7 @@ use iced::widget::{
 use iced::Degrees;
 use iced::{Center, Color, Element, Fill, Font, Function, Shrink, Size, Subscription, Theme};
 use iced_palace::widget::ellipsized_text;
+use log::warn;
 
 pub struct Conversation {
     backend: Backend,
@@ -94,7 +95,7 @@ pub enum Action {
 impl Conversation {
     pub fn new(library: &Library, file: FileOrAPI, backend: Backend) -> (Self, Task<Message>) {
         let (boot, handle) = Task::sip(
-            Assistant::boot(library.directory().clone(), file.clone(), backend),
+            Assistant::boot(library.clone(), file.clone(), backend),
             Message::Booting,
             Message::Booted,
         )
