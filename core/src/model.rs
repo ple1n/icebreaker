@@ -1,4 +1,5 @@
 use crate::directory;
+use crate::model;
 use crate::request;
 use crate::Error;
 
@@ -82,9 +83,11 @@ impl Quantity {
     }
 }
 
+pub type ModelsMap = HashMap<model::EndpointId, Model>;
+
 impl Model {
-    pub async fn list(api: Library) -> Result<Vec<Self>, Error> {
-        let mut resp = Vec::new();
+    pub async fn list(api: Library) -> Result<ModelsMap, Error> {
+        let mut resp = ModelsMap::new();
 
         for (id, api) in api.api_src {
             match &api.kind {
@@ -92,19 +95,25 @@ impl Model {
                     let nanogpt: NanoGPT<OpenAIConfig> =
                         NanoGPT::new(api.openai_compat.clone().unwrap().into());
                     let models = nanogpt.get_models(true).await?;
-                    resp.extend(models.data.into_iter().map(|m| {
-                        Model::API(ModelOnline {
-                            endpoint_id: EndpointId::Remote {
+                    for m in models.data {
+                        let _ = resp.insert(
+                            EndpointId::Remote {
                                 api_type: APIType::NanoGPT,
-                                id: Id(m.id),
+                                id: Id(m.id.clone()),
                             },
-                            cost: m.pricing.as_ref().map(|p| Cost {
-                                prompt: Quantity::usd_per_1m(p.prompt),
-                                completion: Quantity::usd_per_1m(p.completion),
+                            Model::API(ModelOnline {
+                                endpoint_id: EndpointId::Remote {
+                                    api_type: APIType::NanoGPT,
+                                    id: Id(m.id),
+                                },
+                                cost: m.pricing.as_ref().map(|p| Cost {
+                                    prompt: Quantity::usd_per_1m(p.prompt),
+                                    completion: Quantity::usd_per_1m(p.completion),
+                                }),
+                                config: api.clone(),
                             }),
-                            config: api.clone(),
-                        })
-                    }));
+                        );
+                    }
                 }
                 _ => todo!(),
             }
@@ -192,7 +201,7 @@ impl fmt::Display for HFModel {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
-pub struct Id(pub(crate) String);
+pub struct Id(pub String);
 
 impl Id {
     pub fn name(&self) -> &str {

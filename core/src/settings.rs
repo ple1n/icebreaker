@@ -3,6 +3,7 @@ use crate::model;
 use crate::Error;
 
 use decoder::{decode, encode, Value};
+use log::warn;
 use tokio::fs;
 
 use std::path::PathBuf;
@@ -18,6 +19,7 @@ impl Settings {
         use std::fs;
 
         let config = fs::read_to_string(Self::path())?;
+        warn!("config from {}", &config);
         let config: Value = toml::from_str(&config)?;
 
         Ok(Self::decode(config)?)

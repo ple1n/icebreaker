@@ -7,7 +7,7 @@ use crate::model::Model;
 use crate::widget::sidebar;
 use crate::{icon, APIAccess};
 
-use icebreaker_core::model::{EndpointId, Library, ModelOnline};
+use icebreaker_core::model::{EndpointId, Library, ModelOnline, ModelsMap};
 use iced::border;
 use iced::font;
 use iced::time::Duration;
@@ -21,7 +21,7 @@ use iced_palace::widget::ellipsized_text;
 use function::Binary;
 
 pub struct Search {
-    models: HashMap<model::EndpointId, Model>,
+    models: ModelsMap,
     search: String,
     search_temperature: usize,
     is_searching: bool,
@@ -33,7 +33,7 @@ pub struct Search {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    ModelsListed(Result<Vec<Model>, Error>),
+    ModelsListed(Result<ModelsMap, Error>),
     SearchChanged(String),
     SearchCooled,
     Select(model::EndpointId),
@@ -101,10 +101,7 @@ impl Search {
     pub fn update(&mut self, message: Message) -> Action {
         match message {
             Message::ModelsListed(Ok(models)) => {
-                self.models = models
-                    .into_iter()
-                    .map(|model| (model.endpoint_id(), model))
-                    .collect();
+                self.models = models;
                 self.is_searching = false;
 
                 Action::None
@@ -118,24 +115,12 @@ impl Search {
                 self.search = search;
                 self.search_temperature += 1;
 
-                Action::Run(Task::perform(
-                    tokio::time::sleep(Duration::from_secs(1)),
-                    |_| Message::SearchCooled,
-                ))
+                Action::None
             }
             Message::SearchCooled => {
                 self.search_temperature = self.search_temperature.saturating_sub(1);
 
-                if self.search_temperature == 0 {
-                    self.is_searching = true;
-
-                    Action::Run(Task::perform(
-                        Model::search(self.search.clone()),
-                        Message::ModelsListed,
-                    ))
-                } else {
-                    Action::None
-                }
+                Action::None
             }
             Message::Select(id) => {
                 let model = self.models.get(&id);
@@ -425,10 +410,7 @@ impl Search {
         .into()
     }
 
-    pub fn details_api<'a>(
-        &self,
-        model_online: &'a ModelOnline,
-    ) -> Element<'a, Message> {
+    pub fn details_api<'a>(&self, model_online: &'a ModelOnline) -> Element<'a, Message> {
         use iced::widget::Text;
 
         let back = button(row![icon::left(), "All models"].align_y(Center).spacing(10))
@@ -468,7 +450,10 @@ impl Search {
             );
 
             let badges = row![
-                badge(icon::cloud(), text(format!("{:?}", model_online.config.kind))),
+                badge(
+                    icon::cloud(),
+                    text(format!("{:?}", model_online.config.kind))
+                ),
                 model_online.cost.as_ref().map(|cost| {
                     row![
                         badge(icon::dollar(), value(cost.prompt.clone())),
@@ -596,9 +581,7 @@ impl Search {
                 _ => false,
             };
 
-            sidebar::item(entry, is_active, || {
-                Message::Select(fid.clone())
-            })
+            sidebar::item(entry, is_active, || Message::Select(fid.clone()))
         }));
 
         column![header, scrollable(library).spacing(10).height(Fill)]
@@ -680,7 +663,11 @@ fn model_card(model: &Model) -> Element<'_, Message> {
                 .wrapping(text::Wrapping::None);
 
             let metadata = row![
-                stat(icon::user(), text(model.endpoint_id.slash_id().author()), text::secondary),
+                stat(
+                    icon::user(),
+                    text(model.endpoint_id.slash_id().author()),
+                    text::secondary
+                ),
                 stat(
                     icon::cloud(),
                     text(format!("{:?}", model.config.kind)),
@@ -768,9 +755,12 @@ pub fn view_files<'a>(
                 .align_y(Center)
                 .spacing(5),
             )
-            .on_press_with(|| Message::Boot(model::FileAndAPI {
-                file: Some(file.clone()), ..Default::default()
-            }))
+            .on_press_with(|| {
+                Message::Boot(model::FileAndAPI {
+                    file: Some(file.clone()),
+                    ..Default::default()
+                })
+            })
             .style(move |theme, status| {
                 let base = button::background(theme, status);
 
