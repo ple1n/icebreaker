@@ -1,8 +1,12 @@
 use crate::model;
+use crate::model::APIAccess;
 use crate::model::APIType;
 use crate::model::EndpointId;
 use crate::Error;
 
+use langchain_rust::language_models::llm::LLM;
+use langchain_rust::llm::nanogpt::NanoGPT;
+use langchain_rust::llm::OpenAIConfig;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
@@ -392,8 +396,15 @@ impl Assistant {
             match self._server.as_ref() {
                 Server::API => {
                     let model = self.file.api.as_ref().unwrap();
-                    let lib = self.lib.files.get(&model.endpoint_id).unwrap();
-
+                    match model.config.kind {
+                        APIType::NanoGPT => {
+                            let nano: NanoGPT<OpenAIConfig> =
+                                NanoGPT::new(model.config.openai_compat.clone().unwrap().into())
+                                    .with_model(model.endpoint_id.slash_id().0.clone());
+                            nano.stream(messages);
+                        }
+                        _ => unimplemented!(),
+                    }
                 }
                 Server::Process(_) | Server::Container(_) => {
                     let client = reqwest::Client::new();
