@@ -1,7 +1,6 @@
 use crate::model;
 use crate::Error;
 
-use log::warn;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
@@ -16,7 +15,7 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
 pub struct Assistant {
-    pub file: model::FileOrAPI,
+    pub file: model::FileAndAPI,
     lib: model::Library,
     _server: Arc<Server>,
 }
@@ -30,7 +29,7 @@ impl Assistant {
 
     pub fn boot(
         lib: model::Library,
-        file: model::FileOrAPI,
+        file: model::FileAndAPI,
         backend: Backend,
     ) -> impl Straw<Self, BootEvent, Error> {
         use tokio::io::{self, AsyncBufReadExt};
@@ -54,15 +53,19 @@ impl Assistant {
         sipper(move |sender| async move {
             let directory = lib.directory();
 
-            let file = match file {
-                model::FileOrAPI::File(f) => f,
-                model::FileOrAPI::API(ap) => {
+            let file = match &file {
+                model::FileAndAPI { file: Some(f), .. } => f.clone(),
+                model::FileAndAPI { api: Some(ap), .. } => {
                     return Ok(Self {
-                        file: model::FileOrAPI::API(ap),
+                        file: model::FileAndAPI {
+                            file: None,
+                            api: Some(ap.clone()),
+                        },
                         lib,
                         _server: Server::API.into(),
                     });
                 }
+                _ => unreachable!(),
             };
 
             let mut sender = Sender(sender);
@@ -297,7 +300,10 @@ impl Assistant {
                 log_handle.abort();
 
                 return Ok(Self {
-                    file: model::FileOrAPI::File(file),
+                    file: model::FileAndAPI {
+                        file: file.into(),
+                        ..Default::default()
+                    },
                     lib,
                     _server: Arc::new(server),
                 });
@@ -381,9 +387,9 @@ impl Assistant {
         append: &'a [Message],
     ) -> impl Straw<(), Token, Error> + 'a {
         sipper(move |mut sender| async move {
-            match &self.file {
-                model::FileOrAPI::API(api) => {}
-                model::FileOrAPI::File(local) => {
+            match self._server.as_ref() {
+                Server::API => {}
+                Server::Process(_) | Server::Container(_) => {
                     let client = reqwest::Client::new();
 
                     let request = {
@@ -483,7 +489,6 @@ impl Assistant {
                     }
                 }
             }
-
             Ok(())
         })
     }

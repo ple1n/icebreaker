@@ -107,7 +107,7 @@ impl Model {
             Self::HF(m) => &m.id,
         }
     }
-    pub async fn search(query: String) -> Result<Vec<Self>, Error> {
+    pub async fn search(_query: String) -> Result<Vec<Self>, Error> {
         Ok(vec![])
     }
 }
@@ -286,17 +286,26 @@ impl EndpointId {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct FileAndAPI {
+    pub file: Option<File>,
+    pub api: Option<ModelOnline>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FileOrAPI {
     File(File),
-    API(ModelOnline),
+    API(ModelOnline)
 }
 
-impl FileOrAPI {
+impl FileAndAPI {
     pub fn slash_id(&self) -> &Id {
-        match &self {
-            Self::File(f) => &f.model,
-            Self::API(a) => &a.id,
+        if let Some(f) = &self.file {
+            &f.model
+        } else if let Some(a) = &self.api {
+            &a.id
+        } else {
+            panic!("FileOrAPI is empty");
         }
     }
 }
@@ -309,7 +318,7 @@ impl PartialEq for ModelOnline {
 
 impl Eq for ModelOnline {}
 
-impl FileOrAPI {
+impl FileAndAPI {
     pub async fn list(directory: &Directory) -> Result<Vec<Self>, Error> {
         let mut models = Vec::new();
         let dir = directory.as_ref();
@@ -320,7 +329,7 @@ impl FileOrAPI {
             if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
                 let content = fs::read_to_string(&path).await?;
                 let model_online: ModelOnline = serde_json::from_str(&content)?;
-                models.push(FileOrAPI::API(model_online));
+                models.push(FileAndAPI { file: None, api: Some(model_online) });
             }
         }
 
@@ -332,7 +341,7 @@ impl FileOrAPI {
         directory: &'a Directory,
     ) -> impl Straw<PathBuf, request::Progress, Error> + 'a {
         sipper(async move |sender| match self {
-            FileOrAPI::API(ap) => {
+            FileAndAPI { api: Some(ap), .. } => {
                 let json_path = directory
                     .0
                     .join(format!("{}.json", ap.id.0.replace('/', "_")));
@@ -342,7 +351,8 @@ impl FileOrAPI {
                 }
                 Ok(json_path)
             }
-            FileOrAPI::File(file) => file.download(directory, sender).await,
+            FileAndAPI { file: Some(file), .. } => file.download(directory, sender).await,
+            _ => Err(std::io::Error::new(std::io::ErrorKind::Other, "FileOrAPI is empty").into()),
         })
     }
 }
@@ -541,7 +551,7 @@ pub enum EndpointId {
 
 impl Library {
     pub async fn scan(directory: impl AsRef<Path>) -> Result<Self, Error> {
-        let mut files = HashMap::new();
+        let mut files: HashMap<EndpointId, FileOrAPI> = HashMap::new();
         let directory = directory.as_ref();
         let mut list = fs::read_dir(directory).await?;
 
@@ -630,5 +640,14 @@ impl AsRef<Path> for Directory {
 impl fmt::Display for Quantity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:.2}", self.num)
+    }
+}
+
+impl FileOrAPI {
+    pub fn slash_id(&self) -> &Id {
+        match self {
+            Self::File(f) => &f.model,
+            Self::API(a) => &a.id,
+        }
     }
 }

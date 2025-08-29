@@ -19,7 +19,7 @@ use std::path::PathBuf;
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Chat {
     pub id: Id,
-    pub file: model::FileOrAPI,
+    pub file: model::FileAndAPI,
     pub title: Option<String>,
     pub history: Vec<Item>,
 }
@@ -58,7 +58,7 @@ impl Chat {
     }
 
     pub async fn create(
-        file: model::FileOrAPI,
+        file: model::FileAndAPI,
         title: Option<String>,
         history: Vec<Item>,
     ) -> Result<Self, Error> {
@@ -257,7 +257,7 @@ impl Id {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entry {
     pub id: Id,
-    pub file: model::FileOrAPI,
+    pub file: model::FileAndAPI,
     pub title: Option<String>,
 }
 

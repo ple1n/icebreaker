@@ -8,7 +8,7 @@ use crate::ui::plan;
 use crate::ui::{Markdown, Plan, Reply};
 use crate::widget::{copy, regenerate, sidebar, tip, toggle};
 
-use icebreaker_core::model::FileOrAPI;
+use icebreaker_core::model::FileAndAPI;
 use iced::clipboard;
 use iced::gradient;
 use iced::padding;
@@ -42,7 +42,7 @@ pub struct Conversation {
 
 enum State {
     Booting {
-        file: FileOrAPI,
+        file: FileAndAPI,
         logs: Vec<String>,
         stage: String,
         progress: u32,
@@ -93,7 +93,7 @@ pub enum Action {
 }
 
 impl Conversation {
-    pub fn new(library: &Library, file: FileOrAPI, backend: Backend) -> (Self, Task<Message>) {
+    pub fn new(library: &Library, file: FileAndAPI, backend: Backend) -> (Self, Task<Message>) {
         let (boot, handle) = Task::sip(
             Assistant::boot(library.clone(), file.clone(), backend),
             Message::Booting,
