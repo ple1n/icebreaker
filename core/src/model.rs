@@ -7,13 +7,16 @@ use crate::Settings;
 use decoder::{decode, encode, Value};
 use langchain_rust::document_loaders::dotenvy;
 use langchain_rust::language_models::llm::LLM;
+use langchain_rust::language_models::options::CallOptions;
 use langchain_rust::llm::nanogpt::NanoGPT;
 use langchain_rust::llm::OpenAIConfig;
 use langchain_rust::llm::OpenAIConfigSerde;
+use langchain_rust::schemas;
 use log::info;
 use rcu_cell::ArcRCU;
 use rcu_cell::ArcRCUNonNull;
 use serde::{Deserialize, Serialize};
+use sipper::StreamExt;
 use sipper::{sipper, Sipper, Straw};
 use tokio::fs;
 use tokio::sync::watch;
@@ -68,14 +71,23 @@ impl ModelOnline {
             APIType::NanoGPT => {
                 let nanogpt: NanoGPT<OpenAIConfig> =
                     NanoGPT::new(self.config.openai_compat.clone().unwrap().into())
-                        .with_model(self.endpoint_id.slash_id().to_owned());
+                        .with_model(self.endpoint_id.slash_id().to_owned())
+                        .with_options(CallOptions::new().with_max_tokens(10).with_max_length(10));
+
                 let start = time::Instant::now();
-                let response = nanogpt.invoke("hewwo").await;
-                let du = time::Instant::now() - start;
-                match response {
-                    Ok(resp) => {
-                        info!("{:?}: {}", &self.endpoint_id.slash_id(), &resp);
-                        Ok(StatusCheck::Up { rtt: du })
+                let sx = nanogpt
+                    .stream(&[schemas::Message::new_human_message("hi")])
+                    .await;
+                match sx {
+                    Ok(mut stx) => {
+                        if let Some(Ok(resp)) = stx.next().await {
+                            let du = time::Instant::now() - start;
+                            info!("{:?}: {:?}", &self.endpoint_id.slash_id(), &resp.content);
+
+                            Ok(StatusCheck::Up { rtt: du })
+                        } else {
+                            Ok(StatusCheck::Down)
+                        }
                     }
                     Err(_) => Ok(StatusCheck::Down),
                 }

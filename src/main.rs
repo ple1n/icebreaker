@@ -174,11 +174,16 @@ impl Icebreaker {
 
                             task.map(Message::Conversation)
                         }
-                        search::Action::Bookmark(id) => {
+                        search::Action::Bookmark(id, add) => {
                             let lib = Arc::<_>::make_mut(&mut self.library);
-                            if !lib.bookmarks.contains(&id) {
-                                lib.bookmarks.push(id.clone());
+                            if add {
+                                if !lib.bookmarks.contains(&id) {
+                                    lib.bookmarks.push(id.clone());
+                                }
+                            } else {
+                                lib.bookmarks.retain(|bookmark_id| bookmark_id != &id);
                             }
+                            
                             Task::perform(
                                 self.library
                                     .to_owned()

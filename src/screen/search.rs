@@ -48,7 +48,7 @@ pub enum Message {
     ToggleFilters,
     ToggleLocalModels(bool),
     ToggleOnlineModels(bool),
-    Bookmark(model::EndpointId),
+    Bookmark(model::EndpointId, bool),
     CheckStatus { bookmarks: bool, first_n: usize },
 }
 
@@ -69,7 +69,7 @@ pub enum Action {
     None,
     Boot(model::FileAndAPI),
     Run(Task<Message>),
-    Bookmark(model::EndpointId),
+    Bookmark(model::EndpointId, bool),
     Wrap(Message),
 }
 
@@ -216,16 +216,16 @@ impl Search {
                 self.show_online_models = t;
                 Action::None
             }
-            Message::Bookmark(id) => {
+            Message::Bookmark(id, bool) => {
                 // Add model to local registry of favorited models
-                log::info!("Adding API model: {:?}", id);
+                log::info!("Bookmarking API model {:?}", id);
                 let ap = self.models.get(&id).unwrap();
                 let ap = match ap {
                     Model::API(ap) => ap,
                     _ => unreachable!(),
                 };
 
-                Action::Bookmark(ap.endpoint_id.clone())
+                Action::Bookmark(ap.endpoint_id.clone(), bool)
             }
             msg => Action::Wrap(msg),
         }
@@ -242,7 +242,7 @@ impl Search {
             Mode::APIDetails {
                 model,
                 model_online,
-            } => self.details_api(model_online),
+            } => self.details_api(model_online, library),
         }
     }
 
@@ -428,7 +428,11 @@ impl Search {
         .into()
     }
 
-    pub fn details_api<'a>(&self, model_online: &'a ModelOnline) -> Element<'a, Message> {
+    pub fn details_api<'a>(
+        &self,
+        model_online: &'a ModelOnline,
+        library: &'a model::Library,
+    ) -> Element<'a, Message> {
         use iced::widget::Text;
 
         let back = button(row![icon::left(), "All models"].align_y(Center).spacing(10))
@@ -486,9 +490,14 @@ impl Search {
             column![title, badges].spacing(10).align_x(Center)
         };
 
-        let install_button = button("Bookmark")
+        let bookmarked = library.bookmarks.contains(&model_online.endpoint_id);
+
+        let install_button = button(if bookmarked { "Remove" } else { "Bookmark" })
             .padding([10, 20])
-            .on_press(Message::Bookmark(model_online.endpoint_id.clone()))
+            .on_press(Message::Bookmark(
+                model_online.endpoint_id.clone(),
+                !bookmarked,
+            ))
             .style(|theme: &Theme, status| {
                 let palette = theme.extended_palette();
                 let base = button::primary(theme, status);
