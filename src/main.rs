@@ -183,7 +183,7 @@ impl Icebreaker {
                             } else {
                                 lib.bookmarks.retain(|bookmark_id| bookmark_id != &id);
                             }
-                            
+
                             Task::perform(
                                 self.library
                                     .to_owned()
@@ -203,12 +203,16 @@ impl Icebreaker {
                                 for (id, _) in search.models.iter().take(first_n) {
                                     let _ = scheduled_ids.insert(id.clone());
                                 }
+
                                 for id in scheduled_ids {
-                                    let m: &model::Model = search.models.get(&id).unwrap();
-                                    tasks.push(Task::perform(
-                                        m.clone().update_status(),
-                                        Message::StatusUpdated,
-                                    ));
+                                    let m: Option<&model::Model> = search.models.get(&id);
+
+                                    if let Some(m) = m {
+                                        tasks.push(Task::perform(
+                                            m.clone().update_status(),
+                                            Message::StatusUpdated,
+                                        ));
+                                    }
                                 }
 
                                 Task::batch(tasks)

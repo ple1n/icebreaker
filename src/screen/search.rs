@@ -306,7 +306,7 @@ impl Search {
             let check_button = button("Check Status")
                 .on_press(Message::CheckStatus {
                     bookmarks: false,
-                    first_n: 8,
+                    first_n: 20,
                 })
                 .style(button::secondary);
 
