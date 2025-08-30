@@ -5,6 +5,7 @@ use icebreaker_core::model::Library;
 use langchain_rust::document_loaders::dotenvy;
 use langchain_rust::llm::nanogpt::NanoGPT;
 use langchain_rust::llm::OpenAIConfig;
+use log::info;
 use log::warn;
 
 mod browser;
@@ -19,6 +20,7 @@ use crate::core::model;
 use crate::core::{Chat, Error, Settings};
 use crate::screen::conversation;
 use crate::screen::search;
+use crate::screen::search::status_check;
 use crate::screen::settings;
 use crate::screen::Screen;
 
@@ -27,6 +29,7 @@ use iced::widget::{button, column, container, row, rule, vertical_rule, vertical
 use iced::{Element, Fill, Subscription, Task, Theme};
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::mem;
 use std::sync::Arc;
 
@@ -58,7 +61,7 @@ enum Message {
         last_chat: Result<Chat, Error>,
         system: Box<system::Information>,
     },
-    Scanned(Result<model::Library, Error>),
+    Scanned(Result<Arc<model::Library>, Error>),
     Escape,
     Search(search::Message),
     Conversation(conversation::Message),
@@ -75,22 +78,12 @@ enum Message {
 impl Icebreaker {
     pub fn new() -> (Self, Task<Message>) {
         let settings = Settings::fetch().unwrap_or_default();
-        let scan = model::Library::scan(settings.clone());
-        let mut library = model::Library::default();
-
-        let nano_config = OpenAIConfig::new()
-            .with_api_base("https://nano-gpt.com/api/v1")
-            .with_api_key(dotenvy::var("NANOGPT_KEY").expect("provide key"));
-        let api = APIAccess {
-            openai_compat: Some(nano_config.into()),
-            kind: model::APIType::NanoGPT,
-        };
-        let _ = library.api_src.insert(model::APIType::NanoGPT, api);
+        let library = Arc::new(model::Library::default());
 
         (
             Self {
                 screen: Screen::Loading,
-                library: library.into(),
+                library: library.clone(),
                 last_conversation: None,
                 system: None,
                 settings: settings.clone(),
@@ -105,7 +98,10 @@ impl Icebreaker {
                             system,
                         })
                 }),
-                Task::perform(scan, Message::Scanned),
+                Task::perform(
+                    Library::scan(library.clone(), settings.clone()),
+                    Message::Scanned,
+                ),
             ]),
         )
     }
@@ -143,7 +139,8 @@ impl Icebreaker {
                 }
             }
             Message::Scanned(Ok(library)) => {
-                let old_library = std::mem::replace(&mut self.library, Arc::from(library));
+                let old_library = std::mem::replace(&mut self.library, library);
+                info!("scanned {}", self.library.files.len());
 
                 if old_library.directory() != self.library.directory() {
                     self.save_settings()
@@ -192,9 +189,17 @@ impl Icebreaker {
                         search::Action::Wrap(mesg) => match mesg {
                             search::Message::CheckStatus => {
                                 let mut tasks = Vec::new();
-                                for (id, file) in &self.library.files {
+                                let mut scheduled_ids = HashSet::new();
+                                for id in self.library.bookmarks.iter() {
+                                    let _ = scheduled_ids.insert(id.clone());
+                                }
+                                for (id, _) in search.models.iter().take(5) {
+                                    let _ = scheduled_ids.insert(id.clone());
+                                }
+                                for id in scheduled_ids {
+                                    let m = search.models.get(&id).unwrap();
                                     tasks.push(Task::perform(
-                                        self.library.clone().status_check(id.clone()),
+                                        m.clone().update_status(),
                                         Message::StatusUpdated,
                                     ));
                                 }
@@ -241,7 +246,7 @@ impl Icebreaker {
                         self.save_settings()
                     }
                     settings::Action::ChangeLibraryFolder(library) => Task::perform(
-                        model::Library::scan(self.settings.clone()),
+                        model::Library::scan(self.library.clone(), self.settings.clone()),
                         Message::Scanned,
                     ),
                     settings::Action::Run(task) => task.map(Message::Settings),
@@ -410,7 +415,7 @@ impl Icebreaker {
 
         Task::batch([
             Task::perform(
-                model::Library::scan(self.settings.clone()),
+                model::Library::scan(self.library.clone(), self.settings.clone()),
                 Message::Scanned,
             ),
             task.map(Message::Search),

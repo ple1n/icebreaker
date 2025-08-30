@@ -21,9 +21,10 @@ use iced::{Center, Element, Fill, Font, Right, Shrink, Task, Theme};
 use iced_palace::widget::ellipsized_text;
 
 use function::Binary;
+use log::info;
 
 pub struct Search {
-    models: ModelsMap,
+    pub models: ModelsMap,
     search: String,
     search_temperature: usize,
     is_searching: bool,
@@ -68,7 +69,7 @@ pub enum Action {
     Boot(model::FileAndAPI),
     Run(Task<Message>),
     Bookmark(model::EndpointId),
-    Wrap(Message)
+    Wrap(Message),
 }
 
 impl Search {
@@ -219,10 +220,8 @@ impl Search {
                 };
 
                 Action::Bookmark(ap.endpoint_id.clone())
-            },
-            msg => {
-                Action::Wrap(msg)
             }
+            msg => Action::Wrap(msg),
         }
     }
 
@@ -563,9 +562,14 @@ impl Search {
                 }),
             };
 
+            let model = self.models.get(id);
+            let state = match model {
+                Some(model::Model::API(api)) => status_icon(&api),
+                _ => None,
+            };
             let entry = column![
                 title,
-                row![author, horizontal_space(), variant]
+                row![author, state, horizontal_space(), variant]
                     .spacing(5)
                     .align_y(Center)
             ]
@@ -660,13 +664,7 @@ fn model_card(model: &Model) -> Element<'_, Message> {
             let title = ellipsized_text(model.endpoint_id.slash_id().name())
                 .font(Font::MONOSPACE)
                 .wrapping(text::Wrapping::None);
-
-            let status_icon = match model.state_check.read().as_ref() {
-                model::StatusCheck::Up => Some(icon::check().style(text::success).size(10).line_height(1.0)),
-                model::StatusCheck::Down => Some(icon::cancel().style(text::danger).size(10).line_height(1.0)),
-                model::StatusCheck::CheckingStatus => Some(icon::clock().style(text::secondary).size(10).line_height(1.0)),
-                _ => None,
-            };
+            let status_icon = status_icon(model);
 
             let metadata = row![
                 stat(
@@ -674,6 +672,7 @@ fn model_card(model: &Model) -> Element<'_, Message> {
                     text(model.endpoint_id.slash_id().author()),
                     text::secondary
                 ),
+                status_icon,
                 stat(
                     icon::cloud(),
                     text(format!("{:?}", model.config.kind)),
@@ -690,7 +689,6 @@ fn model_card(model: &Model) -> Element<'_, Message> {
                     ]
                     .spacing(10)
                 }),
-                status_icon
             ]
             .spacing(20);
 
@@ -727,6 +725,35 @@ fn model_card(model: &Model) -> Element<'_, Message> {
                 .into()
         }
     }
+}
+
+fn status_icon(model: &ModelOnline) -> Option<Element<'_, Message>> {
+    let status_icon = match model.state_check.read().as_ref() {
+        model::StatusCheck::Up => Some(
+            icon::check()
+                .style(text::success)
+                .size(10)
+                .line_height(1.0)
+                .into(),
+        ),
+        model::StatusCheck::Down => Some(
+            icon::cancel()
+                .style(text::danger)
+                .size(10)
+                .line_height(1.0)
+                .into(),
+        ),
+        model::StatusCheck::CheckingStatus => Some(
+            icon::clock()
+                .style(text::secondary)
+                .size(10)
+                .line_height(1.0)
+                .into(),
+        ),
+        _ => None,
+    };
+
+    status_icon
 }
 
 pub fn view_files<'a>(
@@ -818,4 +845,12 @@ pub fn view_files<'a>(
         .padding(10)
         .style(container::bordered_box)
         .into()
+}
+
+pub async fn status_check(models: &ModelsMap, id: EndpointId) -> Result<(), Error> {
+    if let Some(Model::API(api)) = models.get(&id) {
+        let _ = api.state_check.write(api.check().await?);
+    }
+
+    Ok(())
 }

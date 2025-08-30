@@ -5,6 +5,8 @@ use crate::Error;
 use crate::Settings;
 
 use decoder::{decode, encode, Value};
+use langchain_rust::document_loaders::dotenvy;
+use langchain_rust::language_models::llm::LLM;
 use langchain_rust::llm::nanogpt::NanoGPT;
 use langchain_rust::llm::OpenAIConfig;
 use langchain_rust::llm::OpenAIConfigSerde;
@@ -57,10 +59,51 @@ pub enum StatusCheck {
     Down,
 }
 
+impl ModelOnline {
+    pub async fn check(&self) -> Result<StatusCheck, Error> {
+        info!("checking model");
+        match self.config.kind {
+            APIType::NanoGPT => {
+                let nanogpt: NanoGPT<OpenAIConfig> =
+                    NanoGPT::new(self.config.openai_compat.clone().unwrap().into())
+                        .with_model(self.endpoint_id.slash_id().to_owned());
+                let response = nanogpt.invoke("hewwo").await;
+
+                match response {
+                    Ok(resp) => {
+                        info!("{:?}: {}", &self.endpoint_id.slash_id(), &resp);
+                        Ok(StatusCheck::Up)
+                    }
+                    Err(_) => Ok(StatusCheck::Down),
+                }
+            }
+            _ => Ok(StatusCheck::Down),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Model {
     HF(HFModel),
     API(ModelOnline),
+}
+
+impl Model {
+    pub async fn check(&self) -> Result<StatusCheck, Error> {
+        match self {
+            Model::API(ap) => ap.check().await,
+            _ => Ok(StatusCheck::Down),
+        }
+    }
+    pub async fn update_status(self) -> Result<(), Error> {
+        match self {
+            Model::API(api) => {
+                let _ = api.state_check.write(api.check().await?);
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
@@ -220,6 +263,12 @@ impl fmt::Display for HFModel {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub struct Id(pub String);
 
+impl Into<String> for Id {
+    fn into(self) -> String {
+        self.0
+    }
+}
+
 impl Id {
     pub fn name(&self) -> &str {
         self.0
@@ -326,7 +375,7 @@ impl fmt::Display for Parameters {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct File {
     pub model: Id,
     pub name: String,
@@ -628,8 +677,11 @@ impl EndpointId {
     }
 }
 
+
 impl Library {
-    pub async fn scan(settings: Settings) -> Result<Self, Error> {
+    /// Only scans local model files and basic init
+    pub async fn scan(mut self: Arc<Self>, settings: Settings) -> Result<Arc<Self>, Error> {
+        let lib = Arc::make_mut(&mut self);
         let directory = &settings.library;
         let bookmarks_file = settings.bookmarks();
 
@@ -682,17 +734,29 @@ impl Library {
             Err(_) => Default::default(),
         };
 
-        Ok(Self {
-            directory: Directory(directory.to_path_buf()),
-            files: bookmarks
+        lib.directory = Directory(directory.to_path_buf());
+        lib.files.extend(
+            bookmarks
                 .apis
                 .into_iter()
                 .map(|(id, api)| (id, FileOrAPI::API(api)))
-                .chain(files)
-                .collect(),
-            api_src: bookmarks.api_src,
-            bookmarks: bookmarks.bookmarks,
-        })
+                .chain(files),
+        );
+
+        lib.api_src = bookmarks.api_src;
+        lib.bookmarks = bookmarks.bookmarks;
+
+        let nano_config = OpenAIConfig::new()
+            .with_api_base("https://nano-gpt.com/api/v1")
+            .with_api_key(dotenvy::var("NANOGPT_KEY").expect("provide key"));
+        let api = APIAccess {
+            openai_compat: Some(nano_config.into()),
+            kind: model::APIType::NanoGPT,
+        };
+        let _ = lib.api_src.insert(model::APIType::NanoGPT, api);
+
+        info!("{} {}", lib.files.len(), self.files.len());
+        Ok(self)
     }
 
     pub async fn save_bookmarks(self: Arc<Self>, settings: Settings) -> Result<Arc<Self>, Error> {
@@ -717,8 +781,12 @@ impl Library {
     }
 
     pub async fn status_check(self: Arc<Self>, id: EndpointId) -> Result<(), Error> {
-        
-        
+        if let Some(FileOrAPI::API(api)) = self.files.get(&id) {
+            let _ = api.state_check.write(api.check().await?);
+        } else {
+            info!("skipped");
+        }
+
         Ok(())
     }
 

@@ -3,6 +3,7 @@ use crate::model::APIAccess;
 use crate::model::APIType;
 use crate::model::EndpointId;
 use crate::Error;
+use crate::model::StatusCheck;
 
 use langchain_rust::chain::LLMChainBuilder;
 use langchain_rust::language_models::llm::LLM;
@@ -555,6 +556,14 @@ impl Assistant {
     pub fn name(&self) -> &str {
         self.file.slash_id().name()
     }
+
+    pub async fn check_api_status(&self) -> Result<StatusCheck, Error> {
+        if let Server::API = self._server.as_ref() {
+            self.file.api.as_ref().unwrap().check().await
+        } else {
+            Ok(StatusCheck::Unchecked)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -678,6 +687,7 @@ impl Drop for Server {
         }
     }
 }
+
 
 #[derive(Debug, Clone)]
 pub enum BootEvent {
