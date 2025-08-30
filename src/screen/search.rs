@@ -46,7 +46,8 @@ pub enum Message {
     ToggleFilters,
     ToggleLocalModels(bool),
     ToggleOnlineModels(bool),
-    Bookmark(model::EndpointId), // Add new message for installing API models
+    Bookmark(model::EndpointId),
+    CheckStatus,
 }
 
 pub enum Mode {
@@ -67,6 +68,7 @@ pub enum Action {
     Boot(model::FileAndAPI),
     Run(Task<Message>),
     Bookmark(model::EndpointId),
+    Wrap(Message)
 }
 
 impl Search {
@@ -217,6 +219,9 @@ impl Search {
                 };
 
                 Action::Bookmark(ap.endpoint_id.clone())
+            },
+            msg => {
+                Action::Wrap(msg)
             }
         }
     }
@@ -293,7 +298,11 @@ impl Search {
                 .label("Online Models".to_string())
                 .on_toggle(Message::ToggleOnlineModels);
 
-            container(column![local_toggle, online_toggle].spacing(10))
+            let check_button = button("Check Status")
+                .on_press(Message::CheckStatus)
+                .style(button::secondary);
+
+            container(column![local_toggle, online_toggle, check_button].spacing(10))
                 .padding(10)
                 .style(container::bordered_box)
         });
@@ -652,6 +661,11 @@ fn model_card(model: &Model) -> Element<'_, Message> {
                 .font(Font::MONOSPACE)
                 .wrapping(text::Wrapping::None);
 
+            let status_icon = match model.state_check {
+                model::StatusCheck::Up => icon::check().style(text::success),
+                _ => icon::cancel().style(text::danger),
+            };
+
             let metadata = row![
                 stat(
                     icon::user(),
@@ -674,6 +688,7 @@ fn model_card(model: &Model) -> Element<'_, Message> {
                     ]
                     .spacing(10)
                 }),
+                status_icon.size(10).line_height(1.0),
             ]
             .spacing(20);
 

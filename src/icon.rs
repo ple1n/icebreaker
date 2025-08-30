@@ -1,6 +1,6 @@
 // Generated automatically by iced_fontello at build time.
 // Do not edit manually. Source: ../fonts/icebreaker-icons.toml
-// 0d66c91584919ee988f86cc5e7d99c19ba025ffae4654ee8fa92a9f30ad8252f
+// 9a9af8eb45d7cfe235ba1497d4b236c657640b7644b0677327807e2de2909e1e
 use iced::widget::{text, Text};
 use iced::Font;
 
@@ -16,6 +16,10 @@ pub fn arrow_right<'a>() -> Text<'a> {
 
 pub fn arrow_up<'a>() -> Text<'a> {
     icon("\u{E75F}")
+}
+
+pub fn cancel<'a>() -> Text<'a> {
+    icon("\u{2715}")
 }
 
 pub fn chat<'a>() -> Text<'a> {

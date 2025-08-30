@@ -42,6 +42,16 @@ pub struct ModelOnline {
     pub cost: Option<Cost>,
     /// All the information needed to access this API
     pub config: APIAccess,
+    pub state_check: StatusCheck,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub enum StatusCheck {
+    #[default]
+    Unchecked,
+    CheckingStatus,
+    Up,
+    Down,
 }
 
 #[derive(Debug, Clone)]
@@ -114,6 +124,7 @@ impl Model {
                                     completion: Quantity::usd_per_1m(p.completion),
                                 }),
                                 config: api.clone(),
+                                state_check: Default::default(),
                             }),
                         );
                     }
@@ -426,10 +437,7 @@ impl File {
             }
 
             let file_stem = entry.path.trim_end_matches(".gguf");
-            let variant = file_stem
-                .rsplit(['-', '.'])
-                .next()
-                .unwrap_or(file_stem);
+            let variant = file_stem.rsplit(['-', '.']).next().unwrap_or(file_stem);
             let precision = variant
                 .split('_')
                 .next()
@@ -625,7 +633,7 @@ impl Library {
         let mut files: HashMap<EndpointId, FileOrAPI> = HashMap::new();
         let directory = directory.as_ref();
         fs::create_dir_all(directory).await?;
-        
+
         let mut list = fs::read_dir(directory).await?;
 
         while let Some(author) = list.next_entry().await? {
@@ -673,7 +681,9 @@ impl Library {
 
         Ok(Self {
             directory: Directory(directory.to_path_buf()),
-            files: bookmarks.apis.into_iter()
+            files: bookmarks
+                .apis
+                .into_iter()
                 .map(|(id, api)| (id, FileOrAPI::API(api)))
                 .chain(files)
                 .collect(),
@@ -686,7 +696,9 @@ impl Library {
         let bookmarks_file = settings.bookmarks();
         let api_bookmarks = APIBookmarks {
             api_src: self.api_src.clone(),
-            apis: self.files.iter()
+            apis: self
+                .files
+                .iter()
                 .filter_map(|(id, file_or_api)| match file_or_api {
                     FileOrAPI::API(api) => Some((id.clone(), api.clone())),
                     _ => None,
@@ -699,6 +711,11 @@ impl Library {
         fs::write(bookmarks_file, json).await?;
 
         Ok(self)
+    }
+
+    pub async fn status_check(self: Arc<Self>, id: EndpointId) -> Result<(), Error> {
+        
+        Ok(())
     }
 
     pub fn directory(&self) -> &Directory {

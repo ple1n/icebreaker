@@ -33,6 +33,7 @@ thiserror.workspace = true
 
 iced_palace.workspace = true
 iced_palace.features = ["rand"]
+concurrent-map = "5.0.37"
 
 [build-dependencies]
 iced_fontello = "0.13"

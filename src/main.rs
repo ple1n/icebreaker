@@ -68,6 +68,8 @@ enum Message {
     OpenSettings,
     SettingsSaved(Result<Arc<Library>, Error>),
     SettingsSavedNull(Result<(), Error>),
+    Ignore(Result<(), Error>),
+    StatusUpdated(Result<(), Error>),
 }
 
 impl Icebreaker {
@@ -187,6 +189,22 @@ impl Icebreaker {
                                 Message::SettingsSaved,
                             )
                         }
+                        search::Action::Wrap(mesg) => match mesg {
+                            search::Message::CheckStatus => {
+                                let mut tasks = Vec::new();
+                                for (id, file) in &self.library.files {
+                                    tasks.push(Task::perform(
+                                        self.library.clone().status_check(id.clone()),
+                                        Message::StatusUpdated,
+                                    ));
+                                }
+
+                                Task::batch(tasks)
+                            }
+                            _ => {
+                                unimplemented!()
+                            }
+                        },
                     }
                 } else {
                     Task::none()
@@ -272,9 +290,7 @@ impl Icebreaker {
 
                 Task::none()
             }
-            _ => {
-                Task::none()
-            }
+            _ => Task::none(),
         }
     }
 
