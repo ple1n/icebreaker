@@ -187,17 +187,19 @@ impl Icebreaker {
                             )
                         }
                         search::Action::Wrap(mesg) => match mesg {
-                            search::Message::CheckStatus => {
+                            search::Message::CheckStatus { bookmarks, first_n } => {
                                 let mut tasks = Vec::new();
                                 let mut scheduled_ids = HashSet::new();
-                                for id in self.library.bookmarks.iter() {
-                                    let _ = scheduled_ids.insert(id.clone());
+                                if bookmarks {
+                                    for id in self.library.bookmarks.iter() {
+                                        let _ = scheduled_ids.insert(id.clone());
+                                    }
                                 }
-                                for (id, _) in search.models.iter().take(5) {
+                                for (id, _) in search.models.iter().take(first_n) {
                                     let _ = scheduled_ids.insert(id.clone());
                                 }
                                 for id in scheduled_ids {
-                                    let m = search.models.get(&id).unwrap();
+                                    let m: &model::Model = search.models.get(&id).unwrap();
                                     tasks.push(Task::perform(
                                         m.clone().update_status(),
                                         Message::StatusUpdated,

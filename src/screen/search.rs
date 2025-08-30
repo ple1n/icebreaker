@@ -5,17 +5,18 @@ use std::sync::Arc;
 use crate::core::model;
 use crate::core::{Error, HFModel};
 use crate::model::Model;
+use crate::screen::search;
 use crate::widget::sidebar;
 use crate::{icon, APIAccess};
 
-use icebreaker_core::model::{EndpointId, Library, ModelOnline, ModelsMap};
+use icebreaker_core::model::{EndpointId, FileAndAPI, Library, ModelOnline, ModelsMap};
 use icebreaker_core::Settings;
 use iced::border;
 use iced::font;
 use iced::time::Duration;
 use iced::widget::{
     self, button, center, center_x, column, container, grid, horizontal_rule, horizontal_space,
-    right, row, rule, scrollable, text, text_input, value,
+    right, row, rule, scrollable, text, text_input, value, Text,
 };
 use iced::{Center, Element, Fill, Font, Right, Shrink, Task, Theme};
 use iced_palace::widget::ellipsized_text;
@@ -48,7 +49,7 @@ pub enum Message {
     ToggleLocalModels(bool),
     ToggleOnlineModels(bool),
     Bookmark(model::EndpointId),
-    CheckStatus,
+    CheckStatus { bookmarks: bool, first_n: usize },
 }
 
 pub enum Mode {
@@ -87,7 +88,12 @@ impl Search {
         (
             k,
             Task::batch([
-                Task::perform(Model::list(lib), Message::ModelsListed),
+                Task::perform(Model::list(lib), Message::ModelsListed).chain(Task::done(
+                    Message::CheckStatus {
+                        bookmarks: true,
+                        first_n: 0,
+                    },
+                )),
                 widget::focus_next(),
             ]),
         )
@@ -298,7 +304,10 @@ impl Search {
                 .on_toggle(Message::ToggleOnlineModels);
 
             let check_button = button("Check Status")
-                .on_press(Message::CheckStatus)
+                .on_press(Message::CheckStatus {
+                    bookmarks: false,
+                    first_n: 8,
+                })
                 .style(button::secondary);
 
             container(column![local_toggle, online_toggle, check_button].spacing(10))
@@ -496,8 +505,32 @@ impl Search {
                 }
             });
 
+        let boot_button = button("Chat")
+            .padding([10, 20])
+            .on_press_with(|| {
+                Message::Boot(FileAndAPI {
+                    api: Some(model_online.clone()),
+                    file: None,
+                })
+            })
+            .style(|theme: &Theme, status| {
+                let palette = theme.extended_palette();
+                let base = button::primary(theme, status);
+                button::Style {
+                    background: base.background.map(|bg| {
+                        match status {
+                            button::Status::Hovered => palette.primary.weak.color,
+                            button::Status::Pressed => palette.primary.strong.color,
+                            _ => palette.primary.base.color,
+                        }
+                        .into()
+                    }),
+                    ..base
+                }
+            });
+
         scrollable(center_x(
-            column![back, header, install_button]
+            column![back, header, boot_button, install_button]
                 .spacing(20)
                 .max_width(600)
                 .clip(true),
@@ -729,12 +762,15 @@ fn model_card(model: &Model) -> Element<'_, Message> {
 
 fn status_icon(model: &ModelOnline) -> Option<Element<'_, Message>> {
     let status_icon = match model.state_check.read().as_ref() {
-        model::StatusCheck::Up => Some(
-            icon::check()
-                .style(text::success)
-                .size(10)
-                .line_height(1.0)
-                .into(),
+        model::StatusCheck::Up { rtt } => Some(
+            row![
+                icon::check().style(text::success).size(10).line_height(1.2),
+                horizontal_space().width(2),
+                value(format!("{} ms", rtt.as_millis()))
+                    .size(14)
+                    .line_height(1.2)
+            ]
+            .into(),
         ),
         model::StatusCheck::Down => Some(
             icon::cancel()
@@ -744,8 +780,8 @@ fn status_icon(model: &ModelOnline) -> Option<Element<'_, Message>> {
                 .into(),
         ),
         model::StatusCheck::CheckingStatus => Some(
-            icon::clock()
-                .style(text::secondary)
+            icon::refresh()
+                .style(text::primary)
                 .size(10)
                 .line_height(1.0)
                 .into(),

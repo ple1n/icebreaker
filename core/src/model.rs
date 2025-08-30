@@ -55,7 +55,9 @@ pub enum StatusCheck {
     #[default]
     Unchecked,
     CheckingStatus,
-    Up,
+    Up {
+        rtt: time::Duration,
+    },
     Down,
 }
 
@@ -67,12 +69,13 @@ impl ModelOnline {
                 let nanogpt: NanoGPT<OpenAIConfig> =
                     NanoGPT::new(self.config.openai_compat.clone().unwrap().into())
                         .with_model(self.endpoint_id.slash_id().to_owned());
+                let start = time::Instant::now();
                 let response = nanogpt.invoke("hewwo").await;
-
+                let du = time::Instant::now() - start;
                 match response {
                     Ok(resp) => {
                         info!("{:?}: {}", &self.endpoint_id.slash_id(), &resp);
-                        Ok(StatusCheck::Up)
+                        Ok(StatusCheck::Up { rtt: du })
                     }
                     Err(_) => Ok(StatusCheck::Down),
                 }
@@ -98,6 +101,7 @@ impl Model {
     pub async fn update_status(self) -> Result<(), Error> {
         match self {
             Model::API(api) => {
+                let _ = api.state_check.write(StatusCheck::CheckingStatus);
                 let _ = api.state_check.write(api.check().await?);
                 Ok(())
             }
@@ -647,6 +651,7 @@ impl Readme {
 }
 
 use std::collections::HashMap;
+use std::time;
 #[derive(Debug, Clone, Default)]
 pub struct Library {
     directory: Directory,
@@ -676,7 +681,6 @@ impl EndpointId {
         }
     }
 }
-
 
 impl Library {
     /// Only scans local model files and basic init
