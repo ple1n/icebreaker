@@ -661,9 +661,11 @@ fn model_card(model: &Model) -> Element<'_, Message> {
                 .font(Font::MONOSPACE)
                 .wrapping(text::Wrapping::None);
 
-            let status_icon = match model.state_check {
-                model::StatusCheck::Up => icon::check().style(text::success),
-                _ => icon::cancel().style(text::danger),
+            let status_icon = match model.state_check.read().as_ref() {
+                model::StatusCheck::Up => Some(icon::check().style(text::success).size(10).line_height(1.0)),
+                model::StatusCheck::Down => Some(icon::cancel().style(text::danger).size(10).line_height(1.0)),
+                model::StatusCheck::CheckingStatus => Some(icon::clock().style(text::secondary).size(10).line_height(1.0)),
+                _ => None,
             };
 
             let metadata = row![
@@ -688,7 +690,7 @@ fn model_card(model: &Model) -> Element<'_, Message> {
                     ]
                     .spacing(10)
                 }),
-                status_icon.size(10).line_height(1.0),
+                status_icon
             ]
             .spacing(20);
 

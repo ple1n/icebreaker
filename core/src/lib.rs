@@ -12,6 +12,7 @@ pub use assistant::Assistant;
 pub use chat::Chat;
 pub use model::HFModel;
 pub use plan::Plan;
+use rcu_cell::RcuCell;
 pub use settings::Settings;
 use thiserror::{capture, thiserror, Error};
 

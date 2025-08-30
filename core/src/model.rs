@@ -9,9 +9,12 @@ use langchain_rust::llm::nanogpt::NanoGPT;
 use langchain_rust::llm::OpenAIConfig;
 use langchain_rust::llm::OpenAIConfigSerde;
 use log::info;
+use rcu_cell::ArcRCU;
+use rcu_cell::ArcRCUNonNull;
 use serde::{Deserialize, Serialize};
 use sipper::{sipper, Sipper, Straw};
 use tokio::fs;
+use tokio::sync::watch;
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -42,7 +45,7 @@ pub struct ModelOnline {
     pub cost: Option<Cost>,
     /// All the information needed to access this API
     pub config: APIAccess,
-    pub state_check: StatusCheck,
+    pub state_check: ArcRCUNonNull<StatusCheck>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -714,6 +717,7 @@ impl Library {
     }
 
     pub async fn status_check(self: Arc<Self>, id: EndpointId) -> Result<(), Error> {
+        
         
         Ok(())
     }
